@@ -1,0 +1,248 @@
+service:
+  app_id: bi_dash001
+  name: BI仪表盘
+  description: 团队级BI数据分析插件。支持自定义仪表盘、数据集、图表卡片、下钻明细和权限控制。
+  version: 0.1.0
+  mode: org
+  logo: null
+  language: nodejs
+  language_version: 1.11.33
+  host_version: 1.11.33
+  host_sub_version: 1.11.33
+  min_system_version: 3.11.39
+  auth: null
+  config: null
+  scope: 1
+  policy:
+    policy: standard
+    target: ''
+  permission:
+    - name: BI 仪表盘管理
+      field: bi_admin
+      desc: 允许管理数据集、插件配置等全局设置
+    - name: 创建 BI 仪表盘
+      field: bi_create_dashboard
+      desc: 允许创建新的BI仪表盘
+modules:
+  - id: bi-dashboard-app
+    moduleType: ones:app:new
+    title: BI仪表盘
+    description: BI数据分析仪表盘：创建仪表盘、配置图表卡片、数据分析
+    entry: modules/bi-dashboard-app/index.html
+abilities:
+  - id: bi-sidebar-menu
+    name: 侧边栏菜单
+    version: 1.0.0
+    abilityType: SidebarMenu
+    relateModule:
+      systemMenu: bi-dashboard-app
+apis:
+  - type: external
+    methods:
+      - GET
+    url: /team/:team_uuid/bi/dashboards
+    function: listDashboards
+  - type: external
+    methods:
+      - GET
+    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid
+    function: getDashboard
+  - type: external
+    methods:
+      - POST
+    url: /team/:team_uuid/bi/dashboard
+    function: createDashboard
+  - type: external
+    methods:
+      - POST
+    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid
+    function: updateDashboard
+  - type: external
+    methods:
+      - DELETE
+    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid
+    function: deleteDashboard
+  - type: external
+    methods:
+      - POST
+    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid/card
+    function: createCard
+  - type: external
+    methods:
+      - POST
+    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid/card/:card_uuid
+    function: updateCard
+  - type: external
+    methods:
+      - DELETE
+    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid/card/:card_uuid
+    function: deleteCard
+  - type: external
+    methods:
+      - GET
+    url: /team/:team_uuid/bi/datasets
+    function: listDatasets
+  - type: external
+    methods:
+      - POST
+    url: /team/:team_uuid/bi/dataset
+    function: createDataset
+  - type: external
+    methods:
+      - GET
+    url: /team/:team_uuid/bi/dataset/:dataset_uuid
+    function: getDataset
+  - type: external
+    methods:
+      - POST
+    url: /team/:team_uuid/bi/dataset/:dataset_uuid
+    function: updateDataset
+  - type: external
+    methods:
+      - DELETE
+    url: /team/:team_uuid/bi/dataset/:dataset_uuid
+    function: deleteDataset
+  - type: external
+    methods:
+      - POST
+    url: /team/:team_uuid/bi/query
+    function: biQuery
+  - type: external
+    methods:
+      - POST
+    url: /team/:team_uuid/bi/detail
+    function: biDetail
+  - type: external
+    methods:
+      - GET
+    url: /team/:team_uuid/bi/metadata
+    function: getMetadata
+  - type: external
+    methods:
+      - GET
+    url: /team/:team_uuid/bi/users/me
+    function: getCurrentUser
+storage:
+  entities:
+    - name: bi_dashboard
+      attributes:
+        dashboard_uuid:
+          type: text
+          length: 64
+          default: ''
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        name:
+          type: text
+          length: 256
+          default: ''
+        owner_uuid:
+          type: text
+          length: 64
+          default: ''
+        status:
+          type: text
+          length: 32
+          default: active
+        config_json:
+          type: text
+          length: 32768
+          default: '{}'
+        cards_json:
+          type: text
+          length: 32768
+          default: '[]'
+        created_by:
+          type: text
+          length: 64
+          default: ''
+        created_at:
+          type: integer
+          length: 16
+          default: 0
+        updated_at:
+          type: integer
+          length: 16
+          default: 0
+    - name: bi_dataset
+      attributes:
+        dataset_uuid:
+          type: text
+          length: 64
+          default: ''
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        name:
+          type: text
+          length: 256
+          default: ''
+        source_type:
+          type: text
+          length: 32
+          default: issue
+        owner_uuid:
+          type: text
+          length: 64
+          default: ''
+        field_config_json:
+          type: text
+          length: 32768
+          default: '[]'
+        base_filter_json:
+          type: text
+          length: 8192
+          default: '{}'
+        description:
+          type: text
+          length: 1024
+          default: ''
+        created_by:
+          type: text
+          length: 64
+          default: ''
+        created_at:
+          type: integer
+          length: 16
+          default: 0
+        updated_at:
+          type: integer
+          length: 16
+          default: 0
+    - name: bi_audit_log
+      attributes:
+        log_uuid:
+          type: text
+          length: 64
+          default: ''
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        object_type:
+          type: text
+          length: 32
+          default: ''
+        object_uuid:
+          type: text
+          length: 64
+          default: ''
+        action:
+          type: text
+          length: 64
+          default: ''
+        operator_uuid:
+          type: text
+          length: 64
+          default: ''
+        detail_json:
+          type: text
+          length: 4096
+          default: '{}'
+        created_at:
+          type: integer
+          length: 16
+          default: 0
