@@ -57,8 +57,19 @@ const S: any = {
 const CHART_TYPES = [
   { value: 'number', label: '数字指标卡' },
   { value: 'bar', label: '柱状图' },
+  { value: 'pie', label: '饼图' },
   { value: 'table', label: '表格' },
 ]
+
+const DIMENSION_CHART_TYPES = new Set(['bar', 'pie'])
+
+function pickDefaultDimension(fields: any[]): string {
+  const preferred = ['status', 'issue_type', 'assignee', 'project_uuid']
+  for (const key of preferred) {
+    if (fields.some((f: any) => f.key === key && f.dimension)) return key
+  }
+  return fields.find((x: any) => x.dimension)?.key || ''
+}
 
 interface Props {
   datasets: any[]
@@ -95,11 +106,18 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
       .then((res: any) => {
         const f = JSON.parse(res.data?.field_config_json || '[]')
         setFields(f)
-        const firstDim = f.find((x: any) => x.dimension)
-        if (firstDim) setSelectedDim(firstDim.key)
+        const defaultDim = pickDefaultDimension(f)
+        if (defaultDim) setSelectedDim(defaultDim)
       })
       .catch((e: any) => setLoadError(e.message || '加载数据集字段失败'))
   }, [datasetUuid])
+
+  useEffect(() => {
+    if (!DIMENSION_CHART_TYPES.has(chartType)) return
+    if (selectedDim) return
+    const defaultDim = pickDefaultDimension(fields)
+    if (defaultDim) setSelectedDim(defaultDim)
+  }, [chartType, fields, selectedDim])
 
   const dimFields = fields.filter((f: any) => f.dimension)
   const metricFields = fields.filter((f: any) => f.metric)
@@ -116,7 +134,9 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
       query: {
         metrics: [{ name: 'count', aggregation: metricAgg, field_key: '*' }],
         dimensions:
-          chartType === 'number' || !selectedDim ? [] : [{ field_key: selectedDim, name: selectedDim }],
+          !DIMENSION_CHART_TYPES.has(chartType) || !selectedDim
+            ? []
+            : [{ field_key: selectedDim, name: selectedDim }],
         filters: [],
         sort: [],
         limit: 100,
@@ -160,7 +180,7 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
           </select>
         </div>
         {loadError && <div style={{ color: '#ff4d4f', fontSize: 13, marginBottom: 12 }}>{loadError}</div>}
-        {chartType !== 'number' && (
+        {DIMENSION_CHART_TYPES.has(chartType) && (
           <div style={S.section}>
             <label style={S.label}>分组维度</label>
             <select

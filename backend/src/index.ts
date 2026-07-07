@@ -665,7 +665,7 @@ async function executeOnesqlQuery(
     onesqlResult = await executeOnesql(teamUUID, onesql)
   } catch (e: any) {
     if (params.source_type === 'issue') {
-      const fallback = await executeIssueFallbackQuery(teamUUID, params, {
+      const fallback = await executeIssueFallbackQuerySafely(teamUUID, params, {
         provider: 'onesql',
         error: e?.message || String(e),
         detail: e?.response?.data || null,
@@ -680,7 +680,7 @@ async function executeOnesqlQuery(
     throw e
   }
   if (onesqlResult.debug?.onesqlResult === 'FAIL' && params.source_type === 'issue') {
-    const fallback = await executeIssueFallbackQuery(teamUUID, params, onesqlResult.debug)
+    const fallback = await executeIssueFallbackQuerySafely(teamUUID, params, onesqlResult.debug)
     return {
       rows: fallback.rows,
       total: fallback.rows.length,
@@ -785,6 +785,29 @@ async function executeIssueFallbackQuery(
       filtered_rows: filteredRows.length,
       onesql: onesqlDebug,
     },
+  }
+}
+
+async function executeIssueFallbackQuerySafely(
+  teamUUID: string,
+  params: any,
+  onesqlDebug: any,
+): Promise<{ rows: any[]; debug: any }> {
+  try {
+    return await executeIssueFallbackQuery(teamUUID, params, onesqlDebug)
+  } catch (e: any) {
+    Logger.info('[BI] backend GraphQL fallback failed:', e?.response?.data || e?.message || e)
+    return {
+      rows: [],
+      debug: {
+        provider: 'graphql_tasks_fallback_failed',
+        source_rows: 0,
+        filtered_rows: 0,
+        error: e?.message || String(e),
+        detail: e?.response?.data || null,
+        onesql: onesqlDebug,
+      },
+    }
   }
 }
 

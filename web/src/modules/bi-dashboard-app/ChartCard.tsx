@@ -16,11 +16,29 @@ const S: any = {
   barTrack: { flex: 1, height: 20, background: '#f0f0f0', borderRadius: 4, overflow: 'hidden' },
   barFill: { height: '100%', background: '#1677ff', borderRadius: 4, transition: 'width 0.3s' },
   barValue: { width: 48, textAlign: 'right' as any, fontWeight: 600, flexShrink: 0 },
+  pieWrap: { display: 'flex', gap: 18, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' as any },
+  pie: { width: 150, height: 150, borderRadius: '50%', flexShrink: 0 },
+  legend: { minWidth: 160, maxWidth: 280 },
+  legendRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 },
+  legendDot: { width: 10, height: 10, borderRadius: '50%', flexShrink: 0 },
+  legendLabel: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  legendValue: { fontWeight: 600, color: '#333' },
   table: { width: '100%', borderCollapse: 'collapse' as any, fontSize: 13 },
   th: { padding: '6px 8px', borderBottom: '2px solid #e8e8e8', textAlign: 'left' as any, fontSize: 12, color: '#666', fontWeight: 600 },
   td: { padding: '6px 8px', borderBottom: '1px solid #f0f0f0' },
   deleteBtn: { border: 'none', background: 'transparent', cursor: 'pointer', color: '#ff4d4f', fontSize: 12, padding: 0 },
 }
+
+const CHART_COLORS = [
+  '#1677ff',
+  '#52c41a',
+  '#faad14',
+  '#eb2f96',
+  '#722ed1',
+  '#13c2c2',
+  '#fa541c',
+  '#2f54eb',
+]
 
 interface Props {
   card: any
@@ -179,6 +197,43 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete }) =>
               <div style={S.barValue}>{Number(r[metricKey]) || 0}</div>
             </div>
           ))}
+        </div>
+      )
+    }
+
+    if (chartType === 'pie') {
+      const dimKey = query.dimensions?.[0]?.field_key || query.dimensions?.[0]?.name || Object.keys(rows[0])[0]
+      const metricKey = query.metrics?.[0]?.name || 'count'
+      const visibleRows = rows.slice(0, 8)
+      const total = visibleRows.reduce((sum: number, r: any) => sum + (Number(r[metricKey]) || 0), 0)
+      if (total <= 0) return <div style={S.empty}>暂无数据</div>
+
+      let cursor = 0
+      const gradient = visibleRows
+        .map((r: any, i: number) => {
+          const value = Number(r[metricKey]) || 0
+          const start = cursor
+          cursor += (value / total) * 100
+          return `${CHART_COLORS[i % CHART_COLORS.length]} ${start}% ${cursor}%`
+        })
+        .join(', ')
+
+      return (
+        <div style={S.pieWrap}>
+          <div style={{ ...S.pie, background: `conic-gradient(${gradient})` }} />
+          <div style={S.legend}>
+            {visibleRows.map((r: any, i: number) => {
+              const value = Number(r[metricKey]) || 0
+              const percent = total > 0 ? Math.round((value / total) * 100) : 0
+              return (
+                <div key={i} style={S.legendRow}>
+                  <span style={{ ...S.legendDot, background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                  <span style={S.legendLabel} title={String(r[dimKey] || '-')}>{String(r[dimKey] || '-')}</span>
+                  <span style={S.legendValue}>{value} ({percent}%)</span>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )
     }
