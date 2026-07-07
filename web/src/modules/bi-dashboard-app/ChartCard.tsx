@@ -5,9 +5,13 @@ const S: any = {
   card: { background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8', overflow: 'hidden' },
   cardHeader: { padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   cardTitle: { fontSize: 14, fontWeight: 600 },
+  headerActions: { display: 'flex', alignItems: 'center', gap: 8 },
+  actionBtn: { border: 'none', background: 'transparent', cursor: 'pointer', color: '#1677ff', fontSize: 12, padding: 0 },
   cardBody: { padding: 16 },
+  cardMeta: { marginTop: 12, paddingTop: 10, borderTop: '1px solid #f5f5f5', color: '#999', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' as any },
   loading: { textAlign: 'center', padding: 40, color: '#999', fontSize: 13 },
   error: { textAlign: 'center', padding: 40, color: '#ff4d4f', fontSize: 13 },
+  retryBtn: { marginLeft: 8, border: 'none', background: 'transparent', cursor: 'pointer', color: '#1677ff', fontSize: 13, padding: 0 },
   empty: { textAlign: 'center', padding: 40, color: '#ccc', fontSize: 13 },
   numberValue: { fontSize: 36, fontWeight: 700, color: '#1677ff', textAlign: 'center' as any },
   numberLabel: { fontSize: 12, color: '#999', textAlign: 'center' as any, marginTop: 4 },
@@ -44,6 +48,7 @@ interface Props {
   card: any
   dashboardUuid: string
   onDelete: () => void
+  onCopy: () => void
 }
 
 function readTaskField(task: any, key: string): string {
@@ -117,10 +122,21 @@ async function queryTasksFallback(chartType: string, query: any): Promise<any> {
   return { rows, total: tasks.length }
 }
 
-export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete }) => {
+function getDataSourceLabel(provider?: string): string {
+  if (provider === 'browser_graphql_tasks_fallback') return '浏览器 GraphQL'
+  if (provider === 'graphql_tasks_fallback') return '后端 GraphQL'
+  if (provider === 'graphql_tasks_fallback_failed') return '浏览器兜底'
+  if (provider === 'onesql') return 'ONESQL'
+  return '实时查询'
+}
+
+export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCopy }) => {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [lastUpdated, setLastUpdated] = useState('')
+  const [queryTimeMs, setQueryTimeMs] = useState<number | null>(null)
+  const [dataSource, setDataSource] = useState('实时查询')
 
   const query = useMemo(() => JSON.parse(card.query_json || '{}'), [card.query_json])
 
@@ -133,6 +149,7 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete }) =>
     }
     setLoading(true)
     setError('')
+    const startedAt = Date.now()
     try {
       const res = await apiPost('/bi/query', {
         dataset_uuid: card.dataset_uuid,
@@ -147,15 +164,26 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete }) =>
         res.data?.debug?.onesqlResult === 'FAIL' ||
         res.data?.debug?.provider === 'graphql_tasks_fallback_failed'
       ) {
-        setData(await queryTasksFallback(card.chart_type, query))
+        const fallbackData = await queryTasksFallback(card.chart_type, query)
+        setData(fallbackData)
+        setQueryTimeMs(Date.now() - startedAt)
+        setDataSource(getDataSourceLabel('browser_graphql_tasks_fallback'))
       } else {
         setData(res.data)
+        setQueryTimeMs(res.data?.query_time_ms ?? Date.now() - startedAt)
+        setDataSource(getDataSourceLabel(res.data?.debug?.provider))
       }
+      setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
     } catch (e: any) {
       try {
-        setData(await queryTasksFallback(card.chart_type, query))
+        const fallbackData = await queryTasksFallback(card.chart_type, query)
+        setData(fallbackData)
+        setQueryTimeMs(Date.now() - startedAt)
+        setDataSource(getDataSourceLabel('browser_graphql_tasks_fallback'))
+        setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
       } catch (fallbackError: any) {
         setError(fallbackError.message || e.message || '查询失败')
+        setQueryTimeMs(Date.now() - startedAt)
       }
     } finally {
       setLoading(false)
@@ -166,7 +194,7 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete }) =>
 
   function renderChart() {
     if (loading) return <div style={S.loading}>加载中...</div>
-    if (error) return <div style={S.error}>{error}</div>
+    if (error) return <div style={S.error}>{error}<button style={S.retryBtn} onClick={loadData}>重试</button></div>
     if (!data?.rows || data.rows.length === 0) return <div style={S.empty}>暂无数据</div>
 
     const rows = data.rows
@@ -261,9 +289,20 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete }) =>
     <div style={S.card}>
       <div style={S.cardHeader}>
         <span style={S.cardTitle}>{card.title}</span>
-        <button style={S.deleteBtn} onClick={onDelete}>删除</button>
+        <div style={S.headerActions}>
+          <button style={S.actionBtn} onClick={loadData} disabled={loading}>刷新</button>
+          <button style={S.actionBtn} onClick={onCopy}>复制</button>
+          <button style={S.deleteBtn} onClick={onDelete}>删除</button>
+        </div>
       </div>
-      <div style={S.cardBody}>{renderChart()}</div>
+      <div style={S.cardBody}>
+        {renderChart()}
+        <div style={S.cardMeta}>
+          <span>数据源：{dataSource}</span>
+          <span>耗时：{queryTimeMs === null ? '-' : `${queryTimeMs}ms`}</span>
+          <span>更新：{lastUpdated || '-'}</span>
+        </div>
+      </div>
     </div>
   )
 }

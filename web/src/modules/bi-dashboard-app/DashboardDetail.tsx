@@ -63,6 +63,20 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
     } catch (e: any) { setMsg(e.message) }
   }
 
+  async function handleCopyCard(card: any) {
+    try {
+      await apiPost(`/bi/dashboard/${dashboardUuid}/card`, {
+        title: `${card.title || '未命名卡片'} 副本`,
+        chart_type: card.chart_type,
+        dataset_uuid: card.dataset_uuid,
+        query: JSON.parse(card.query_json || '{}'),
+        style: JSON.parse(card.style_json || '{}'),
+        layout: card.layout || { x: 0, y: 0, w: 6, h: 4 },
+      })
+      await loadDetail()
+    } catch (e: any) { setMsg(e.message) }
+  }
+
   if (loading) return <div style={S.empty}>加载中...</div>
 
   return (
@@ -82,7 +96,13 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
         ) : (
           <div style={S.grid}>
             {cards.map((card: any) => (
-              <ChartCard key={card.card_uuid} card={card} dashboardUuid={dashboardUuid} onDelete={() => handleDeleteCard(card.card_uuid)} />
+              <ChartCard
+                key={card.card_uuid}
+                card={card}
+                dashboardUuid={dashboardUuid}
+                onDelete={() => handleDeleteCard(card.card_uuid)}
+                onCopy={() => handleCopyCard(card)}
+              />
             ))}
           </div>
         )}
