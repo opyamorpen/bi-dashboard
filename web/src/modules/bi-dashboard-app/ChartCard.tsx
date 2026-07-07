@@ -2,12 +2,14 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { apiPost, getTeamUUID } from '../../api'
 
 const S: any = {
-  card: { background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8', overflow: 'hidden' },
+  card: { background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8', overflow: 'hidden', alignSelf: 'start' },
   cardHeader: { padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   cardTitle: { fontSize: 14, fontWeight: 600 },
   headerActions: { display: 'flex', alignItems: 'center', gap: 8 },
   actionBtn: { border: 'none', background: 'transparent', cursor: 'pointer', color: '#1677ff', fontSize: 12, padding: 0 },
   cardBody: { padding: 16 },
+  chartViewport: { maxHeight: 360, overflowY: 'auto' as any, overflowX: 'hidden' as any, paddingRight: 4 },
+  chartViewportCompact: { maxHeight: 220, overflow: 'hidden' },
   cardMeta: { marginTop: 12, paddingTop: 10, borderTop: '1px solid #f5f5f5', color: '#999', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' as any },
   loading: { textAlign: 'center', padding: 40, color: '#999', fontSize: 13 },
   error: { textAlign: 'center', padding: 40, color: '#ff4d4f', fontSize: 13 },
@@ -15,7 +17,7 @@ const S: any = {
   empty: { textAlign: 'center', padding: 40, color: '#ccc', fontSize: 13 },
   numberValue: { fontSize: 36, fontWeight: 700, color: '#1677ff', textAlign: 'center' as any },
   numberLabel: { fontSize: 12, color: '#999', textAlign: 'center' as any, marginTop: 4 },
-  barRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 13 },
+  barRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 13, minHeight: 20 },
   barLabel: { width: 100, textAlign: 'right' as any, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 },
   barTrack: { flex: 1, height: 20, background: '#f0f0f0', borderRadius: 4, overflow: 'hidden' },
   barFill: { height: '100%', background: '#1677ff', borderRadius: 4, transition: 'width 0.3s' },
@@ -267,6 +269,11 @@ function getDisplayLimit(query: any, chartType: string, fallback: number): numbe
   const value = Number.isFinite(raw) && raw > 0 ? raw : fallback
   if (chartType === 'table') return Math.min(Math.max(value, 1), 1000)
   return Math.min(Math.max(value, 1), 50)
+}
+
+function getChartViewportStyle(chartType: string): any {
+  if (chartType === 'bar' || chartType === 'table') return S.chartViewport
+  return S.chartViewportCompact
 }
 
 function findDisplayName(value: any): string {
@@ -688,7 +695,9 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
         </div>
       </div>
       <div style={S.cardBody}>
-        {renderChart()}
+        <div style={getChartViewportStyle(card.chart_type)}>
+          {renderChart()}
+        </div>
         <div style={S.cardMeta}>
           <span>数据源：{dataSource}</span>
           <span>耗时：{queryTimeMs === null ? '-' : `${queryTimeMs}ms`}</span>

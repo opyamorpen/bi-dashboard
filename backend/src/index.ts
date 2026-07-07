@@ -200,7 +200,7 @@ export function UnInstall() {
 }
 
 export async function Enable() {
-  Logger.info('[BI] Enable — v0.4.18 adds donut chart, configurable Top N display, and exact issue type counts')
+  Logger.info('[BI] Enable — v0.4.19 constrains chart card height with scrollable long lists')
 }
 
 export function Upgrade(oldVersion: any) {
