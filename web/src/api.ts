@@ -15,21 +15,35 @@ export function getTeamUUID(): string {
     if (env?.teamUUID) return env.teamUUID
     if (env?.team_uuid) return env.team_uuid
     if (env?.contextStore?.teamInfo?.uuid) return env.contextStore.teamInfo.uuid
-  } catch {}
+  } catch {
+    /* ignore */
+  }
   try {
     const store = (window as any).__ONES_STORE__
     const uuid = store?.getState?.()?.contextStore?.teamInfo?.uuid
     if (uuid) return uuid
-  } catch {}
+  } catch {
+    /* ignore */
+  }
   {
     const urls: string[] = []
-    try { urls.push(window.location.href) } catch {}
-    try { urls.push(window.location.pathname) } catch {}
+    try {
+      urls.push(window.location.href)
+    } catch {
+      /* ignore */
+    }
+    try {
+      urls.push(window.location.pathname)
+    } catch {
+      /* ignore */
+    }
     try {
       for (let i = 0; i < document.scripts.length; i++) {
         urls.push(document.scripts[i].src || '')
       }
-    } catch {}
+    } catch {
+      /* ignore */
+    }
     for (const value of urls) {
       if (!value) continue
       const m = value.match(/\/plugin\/([^/]+)\/([^/]+)\/([^/]+)\//)
@@ -39,7 +53,9 @@ export function getTeamUUID(): string {
   try {
     const m = window.parent.location.hash.match(/\/team\/([A-Za-z0-9]+)/)
     if (m?.[1]) return m[1]
-  } catch {}
+  } catch {
+    /* ignore */
+  }
   return ''
 }
 
@@ -48,23 +64,25 @@ function getApiAppID(): string {
     const env = (window as any).__ONES_MF_ENV__ || {}
     if (env.pluginID) return env.pluginID
     if (env.appID) return env.appID
-  } catch {}
-  {
-    const urls: string[] = []
-    try { urls.push(window.location.href) } catch {}
-    try { urls.push(window.location.pathname) } catch {}
-    try {
-      for (let i = 0; i < document.scripts.length; i++) {
-        urls.push(document.scripts[i].src || '')
-      }
-    } catch {}
-    for (const value of urls) {
-      if (!value) continue
-      const m = value.match(/\/plugin\/([^/]+)\/([^/]+)\/([^/]+)\//)
+  } catch {
+    /* ignore */
+  }
+  try {
+    const m = window.location.pathname.match(/\/plugin\/([^/]+)\//)
+    if (m) return m[1]
+  } catch {
+    /* ignore */
+  }
+  try {
+    for (let i = 0; i < document.scripts.length; i++) {
+      const src = document.scripts[i].src || ''
+      const m = src.match(/\/plugin\/([^/]+)\/([^/]+)\/([^/]+)\//)
       if (m) return m[3]
     }
+  } catch {
+    /* ignore */
   }
-  return 'j4BsRG9J'
+  return '8SHK4cQv'
 }
 
 export class BiApiError extends Error {

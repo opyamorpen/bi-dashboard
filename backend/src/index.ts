@@ -1,7 +1,7 @@
 import { Logger } from '@ones-op/node-logger'
 import { storage } from '@ones-op/sdk/node'
 import type { PluginResponse } from '@ones-op/node-types'
-import { OPFetch } from '@ones-op/fetch'
+import { FetchAsAdmin } from '@ones-op/fetch'
 
 // ============================================================
 // 实体引用
@@ -28,7 +28,7 @@ async function qAll(e: any, filter?: (v: any) => boolean) {
       allItems.push({ _key: d.key, ...(d.value || {}) })
     }
     const pi = result.page_info
-    if (pi && pi.has_more && pi.end_cursor) {
+    if (pi?.has_more && pi?.end_cursor) {
       cursor = pi.end_cursor
     } else {
       break
@@ -90,15 +90,29 @@ function getParam(req: any, name: string): string {
   return ''
 }
 
-async function writeAudit(teamUUID: string, objectType: string, objectUuid: string, action: string, operator: string, detail: any) {
+async function writeAudit(
+  teamUUID: string,
+  objectType: string,
+  objectUuid: string,
+  action: string,
+  operator: string,
+  detail: any,
+) {
   try {
     const k = `${teamUUID}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    await auditLog.set(k, cleanForSet({
-      log_uuid: k, team_uuid: teamUUID, object_type: objectType,
-      object_uuid: objectUuid, action, operator_uuid: operator,
-      detail_json: typeof detail === 'string' ? detail : JSON.stringify(detail),
-      created_at: Date.now(),
-    }))
+    await auditLog.set(
+      k,
+      cleanForSet({
+        log_uuid: k,
+        team_uuid: teamUUID,
+        object_type: objectType,
+        object_uuid: objectUuid,
+        action,
+        operator_uuid: operator,
+        detail_json: typeof detail === 'string' ? detail : JSON.stringify(detail),
+        created_at: Date.now(),
+      }),
+    )
   } catch (e) {
     Logger.error('[BI] writeAudit failed:', e)
   }
@@ -107,9 +121,15 @@ async function writeAudit(teamUUID: string, objectType: string, objectUuid: stri
 // ============================================================
 // 生命周期
 // ============================================================
-export function Install() { Logger.info('[BI] Install') }
-export function Disable() { Logger.info('[BI] Disable') }
-export function UnInstall() { Logger.info('[BI] UnInstall') }
+export function Install() {
+  Logger.info('[BI] Install')
+}
+export function Disable() {
+  Logger.info('[BI] Disable')
+}
+export function UnInstall() {
+  Logger.info('[BI] UnInstall')
+}
 
 export async function Enable() {
   Logger.info('[BI] Enable — v0.1.0')
@@ -127,34 +147,44 @@ export async function listDashboards(req: any): Promise<PluginResponse> {
   const teamUUID = getParam(req, 'teamUUID')
   const operator = getOperator(req)
   const all = await qAll(dashboardEntity, (v: any) => v.team_uuid === teamUUID)
-  const visible = all.filter((d: any) => d.status !== 'deleted' && (d.owner_uuid === operator || d.status === 'active'))
+  const visible = all.filter(
+    (d: any) => d.status !== 'deleted' && (d.owner_uuid === operator || d.status === 'active'),
+  )
   visible.sort((a: any, b: any) => (b.updated_at || 0) - (a.updated_at || 0))
-  return { body: { data: visible.map((d: any) => ({
-    dashboard_uuid: d.dashboard_uuid,
-    name: d.name,
-    owner_uuid: d.owner_uuid,
-    status: d.status,
-    card_count: 0,
-    created_at: d.created_at,
-    updated_at: d.updated_at,
-  })) } }
+  return {
+    body: {
+      data: visible.map((d: any) => ({
+        dashboard_uuid: d.dashboard_uuid,
+        name: d.name,
+        owner_uuid: d.owner_uuid,
+        status: d.status,
+        card_count: 0,
+        created_at: d.created_at,
+        updated_at: d.updated_at,
+      })),
+    },
+  }
 }
 
 export async function getDashboard(req: any): Promise<PluginResponse> {
   const dashboardUuid = getParam(req, 'dashboardUUID')
   if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
-  const d = await dashboardEntity.get(dashboardUuid) as any
+  const d = (await dashboardEntity.get(dashboardUuid)) as any
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
-  return { body: { data: {
-    dashboard_uuid: d.dashboard_uuid,
-    name: d.name,
-    owner_uuid: d.owner_uuid,
-    status: d.status,
-    config_json: d.config_json || '{}',
-    cards_json: d.cards_json || '[]',
-    created_at: d.created_at,
-    updated_at: d.updated_at,
-  } } }
+  return {
+    body: {
+      data: {
+        dashboard_uuid: d.dashboard_uuid,
+        name: d.name,
+        owner_uuid: d.owner_uuid,
+        status: d.status,
+        config_json: d.config_json || '{}',
+        cards_json: d.cards_json || '[]',
+        created_at: d.created_at,
+        updated_at: d.updated_at,
+      },
+    },
+  }
 }
 
 export async function createDashboard(req: any): Promise<PluginResponse> {
@@ -164,18 +194,21 @@ export async function createDashboard(req: any): Promise<PluginResponse> {
   if (!b.name) return { body: { error: '缺少仪表盘名称' }, statusCode: 400 }
   const uuid = makeUuid()
   const now = Date.now()
-  await dashboardEntity.set(uuid, cleanForSet({
-    dashboard_uuid: uuid,
-    team_uuid: teamUUID,
-    name: b.name,
-    owner_uuid: operator,
-    status: 'active',
-    config_json: JSON.stringify(b.config || { layout: 'grid' }),
-    cards_json: '[]',
-    created_by: operator,
-    created_at: now,
-    updated_at: now,
-  }))
+  await dashboardEntity.set(
+    uuid,
+    cleanForSet({
+      dashboard_uuid: uuid,
+      team_uuid: teamUUID,
+      name: b.name,
+      owner_uuid: operator,
+      status: 'active',
+      config_json: JSON.stringify(b.config || { layout: 'grid' }),
+      cards_json: '[]',
+      created_by: operator,
+      created_at: now,
+      updated_at: now,
+    }),
+  )
   await writeAudit(teamUUID, 'dashboard', uuid, '创建仪表盘', operator, { name: b.name })
   return { body: { data: { dashboard_uuid: uuid, name: b.name } } }
 }
@@ -185,7 +218,7 @@ export async function updateDashboard(req: any): Promise<PluginResponse> {
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
-  const d = await dashboardEntity.get(dashboardUuid) as any
+  const d = (await dashboardEntity.get(dashboardUuid)) as any
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
   const next: any = { ...d, updated_at: Date.now() }
   if (b.name) next.name = b.name
@@ -193,7 +226,9 @@ export async function updateDashboard(req: any): Promise<PluginResponse> {
   if (b.cards) next.cards_json = JSON.stringify(b.cards)
   if (b.status) next.status = b.status
   await dashboardEntity.set(dashboardUuid, cleanForSet(next))
-  await writeAudit(d.team_uuid, 'dashboard', dashboardUuid, '更新仪表盘', operator, { name: next.name })
+  await writeAudit(d.team_uuid, 'dashboard', dashboardUuid, '更新仪表盘', operator, {
+    name: next.name,
+  })
   return { body: { data: { ok: true } } }
 }
 
@@ -201,11 +236,13 @@ export async function deleteDashboard(req: any): Promise<PluginResponse> {
   const dashboardUuid = getParam(req, 'dashboardUUID')
   const operator = getOperator(req)
   if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
-  const d = await dashboardEntity.get(dashboardUuid) as any
+  const d = (await dashboardEntity.get(dashboardUuid)) as any
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
   if (d.owner_uuid !== operator) return { body: { error: '仅所有者可删除' }, statusCode: 403 }
   await dashboardEntity.delete(dashboardUuid)
-  await writeAudit(d.team_uuid, 'dashboard', dashboardUuid, '删除仪表盘', operator, { name: d.name })
+  await writeAudit(d.team_uuid, 'dashboard', dashboardUuid, '删除仪表盘', operator, {
+    name: d.name,
+  })
   return { body: { data: { ok: true } } }
 }
 
@@ -218,7 +255,7 @@ export async function createCard(req: any): Promise<PluginResponse> {
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
-  const d = await dashboardEntity.get(dashboardUuid) as any
+  const d = (await dashboardEntity.get(dashboardUuid)) as any
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
   const cards = JSON.parse(d.cards_json || '[]')
   const cardUuid = makeUuid()
@@ -232,7 +269,10 @@ export async function createCard(req: any): Promise<PluginResponse> {
     layout: b.layout || { x: 0, y: 0, w: 4, h: 3 },
   }
   cards.push(newCard)
-  await dashboardEntity.set(dashboardUuid, cleanForSet({ ...d, cards_json: JSON.stringify(cards), updated_at: Date.now() }))
+  await dashboardEntity.set(
+    dashboardUuid,
+    cleanForSet({ ...d, cards_json: JSON.stringify(cards), updated_at: Date.now() }),
+  )
   await writeAudit(d.team_uuid, 'card', cardUuid, '创建卡片', operator, { title: newCard.title })
   return { body: { data: newCard } }
 }
@@ -242,7 +282,7 @@ export async function updateCard(req: any): Promise<PluginResponse> {
   const cardUuid = getParam(req, 'cardUUID')
   const operator = getOperator(req)
   const b = (req.body || {}) as any
-  const d = await dashboardEntity.get(dashboardUuid) as any
+  const d = (await dashboardEntity.get(dashboardUuid)) as any
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
   const cards = JSON.parse(d.cards_json || '[]')
   const idx = cards.findIndex((c: any) => c.card_uuid === cardUuid)
@@ -253,7 +293,10 @@ export async function updateCard(req: any): Promise<PluginResponse> {
   if (b.query) cards[idx].query_json = JSON.stringify(b.query)
   if (b.style) cards[idx].style_json = JSON.stringify(b.style)
   if (b.layout) cards[idx].layout = b.layout
-  await dashboardEntity.set(dashboardUuid, cleanForSet({ ...d, cards_json: JSON.stringify(cards), updated_at: Date.now() }))
+  await dashboardEntity.set(
+    dashboardUuid,
+    cleanForSet({ ...d, cards_json: JSON.stringify(cards), updated_at: Date.now() }),
+  )
   return { body: { data: cards[idx] } }
 }
 
@@ -261,11 +304,14 @@ export async function deleteCard(req: any): Promise<PluginResponse> {
   const dashboardUuid = getParam(req, 'dashboardUUID')
   const cardUuid = getParam(req, 'cardUUID')
   const operator = getOperator(req)
-  const d = await dashboardEntity.get(dashboardUuid) as any
+  const d = (await dashboardEntity.get(dashboardUuid)) as any
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
   const cards = JSON.parse(d.cards_json || '[]')
   const filtered = cards.filter((c: any) => c.card_uuid !== cardUuid)
-  await dashboardEntity.set(dashboardUuid, cleanForSet({ ...d, cards_json: JSON.stringify(filtered), updated_at: Date.now() }))
+  await dashboardEntity.set(
+    dashboardUuid,
+    cleanForSet({ ...d, cards_json: JSON.stringify(filtered), updated_at: Date.now() }),
+  )
   return { body: { data: { ok: true } } }
 }
 
@@ -275,29 +321,40 @@ export async function deleteCard(req: any): Promise<PluginResponse> {
 
 export async function listDatasets(req: any): Promise<PluginResponse> {
   const teamUUID = getParam(req, 'teamUUID')
-  const all = await qAll(datasetEntity, (v: any) => v.team_uuid === teamUUID || v.dataset_uuid === 'default_issue_dataset')
-  return { body: { data: all.map((d: any) => ({
-    dataset_uuid: d.dataset_uuid,
-    name: d.name,
-    source_type: d.source_type,
-    description: d.description,
-    field_config_json: d.field_config_json || '[]',
-    created_at: d.created_at,
-  })) } }
+  const all = await qAll(
+    datasetEntity,
+    (v: any) => v.team_uuid === teamUUID || v.dataset_uuid === 'default_issue_dataset',
+  )
+  return {
+    body: {
+      data: all.map((d: any) => ({
+        dataset_uuid: d.dataset_uuid,
+        name: d.name,
+        source_type: d.source_type,
+        description: d.description,
+        field_config_json: d.field_config_json || '[]',
+        created_at: d.created_at,
+      })),
+    },
+  }
 }
 
 export async function getDataset(req: any): Promise<PluginResponse> {
   const datasetUuid = getParam(req, 'datasetUUID')
-  const d = await datasetEntity.get(datasetUuid) as any
+  const d = (await datasetEntity.get(datasetUuid)) as any
   if (!d) return { body: { error: '数据集不存在' }, statusCode: 404 }
-  return { body: { data: {
-    dataset_uuid: d.dataset_uuid,
-    name: d.name,
-    source_type: d.source_type,
-    field_config_json: d.field_config_json || '[]',
-    base_filter_json: d.base_filter_json || '{}',
-    description: d.description,
-  } } }
+  return {
+    body: {
+      data: {
+        dataset_uuid: d.dataset_uuid,
+        name: d.name,
+        source_type: d.source_type,
+        field_config_json: d.field_config_json || '[]',
+        base_filter_json: d.base_filter_json || '{}',
+        description: d.description,
+      },
+    },
+  }
 }
 
 export async function createDataset(req: any): Promise<PluginResponse> {
@@ -307,14 +364,22 @@ export async function createDataset(req: any): Promise<PluginResponse> {
   if (!b.name) return { body: { error: '缺少数据集名称' }, statusCode: 400 }
   const uuid = makeUuid()
   const now = Date.now()
-  await datasetEntity.set(uuid, cleanForSet({
-    dataset_uuid: uuid, team_uuid: teamUUID, name: b.name,
-    source_type: b.source_type || 'issue', owner_uuid: operator,
-    field_config_json: JSON.stringify(b.fields || []),
-    base_filter_json: JSON.stringify(b.base_filter || {}),
-    description: b.description || '',
-    created_by: operator, created_at: now, updated_at: now,
-  }))
+  await datasetEntity.set(
+    uuid,
+    cleanForSet({
+      dataset_uuid: uuid,
+      team_uuid: teamUUID,
+      name: b.name,
+      source_type: b.source_type || 'issue',
+      owner_uuid: operator,
+      field_config_json: JSON.stringify(b.fields || []),
+      base_filter_json: JSON.stringify(b.base_filter || {}),
+      description: b.description || '',
+      created_by: operator,
+      created_at: now,
+      updated_at: now,
+    }),
+  )
   return { body: { data: { dataset_uuid: uuid } } }
 }
 
@@ -322,7 +387,7 @@ export async function updateDataset(req: any): Promise<PluginResponse> {
   const datasetUuid = getParam(req, 'datasetUUID')
   const operator = getOperator(req)
   const b = (req.body || {}) as any
-  const d = await datasetEntity.get(datasetUuid) as any
+  const d = (await datasetEntity.get(datasetUuid)) as any
   if (!d) return { body: { error: '数据集不存在' }, statusCode: 404 }
   const next: any = { ...d, updated_at: Date.now() }
   if (b.name) next.name = b.name
@@ -335,7 +400,8 @@ export async function updateDataset(req: any): Promise<PluginResponse> {
 
 export async function deleteDataset(req: any): Promise<PluginResponse> {
   const datasetUuid = getParam(req, 'datasetUUID')
-  if (datasetUuid === 'default_issue_dataset') return { body: { error: '默认数据集不可删除' }, statusCode: 403 }
+  if (datasetUuid === 'default_issue_dataset')
+    return { body: { error: '默认数据集不可删除' }, statusCode: 403 }
   await datasetEntity.delete(datasetUuid)
   return { body: { data: { ok: true } } }
 }
@@ -350,7 +416,7 @@ export async function biQuery(req: any): Promise<PluginResponse> {
   const { dataset_uuid, chart_type, metrics, dimensions, filters, sort, limit } = b
   if (!dataset_uuid) return { body: { error: '缺少 dataset_uuid' }, statusCode: 400 }
 
-  const ds = await datasetEntity.get(dataset_uuid) as any
+  const ds = (await datasetEntity.get(dataset_uuid)) as any
   if (!ds) return { body: { error: '数据集不存在' }, statusCode: 404 }
 
   try {
@@ -364,22 +430,52 @@ export async function biQuery(req: any): Promise<PluginResponse> {
       limit: limit || 1000,
     })
 
-    return { body: { data: {
-      rows: queryResult.rows,
-      total: queryResult.total,
-      query_time_ms: queryResult.query_time_ms,
-      chart_type,
-      dimensions,
-      metrics,
-    } } }
+    return {
+      body: {
+        data: {
+          rows: queryResult.rows,
+          total: queryResult.total,
+          query_time_ms: queryResult.query_time_ms,
+          chart_type,
+          dimensions,
+          metrics,
+        },
+      },
+    }
   } catch (e: any) {
     Logger.error('[BI] biQuery error:', e?.message || e)
     return { body: { error: `查询失败: ${e?.message || e}` }, statusCode: 500 }
   }
 }
 
-// ONESQL 查询执行器
-async function executeOnesqlQuery(teamUUID: string, params: any): Promise<{ rows: any[]; total: number; query_time_ms: number }> {
+// ============================================================
+// ONESQL 统一执行器 — 使用 FetchAsAdmin（自动管理 OAuth token）
+// ============================================================
+async function executeOnesql(
+  teamUUID: string,
+  query: string,
+  variables: unknown[] = [],
+): Promise<any[]> {
+  Logger.info(`[BI] ONESQL: ${query}`)
+  const res = (await FetchAsAdmin('/onesql/query', {
+    method: 'POST',
+    params: { teamID: teamUUID },
+    data: { query, variables },
+  })) as any
+
+  // ONESQL 返回格式: { result: "SUCCESS", data: { data: [{ type: "item", item: {...} }], page_info: {...} } }
+  const rawRows = res?.data?.data || res?.data || []
+  if (Array.isArray(rawRows) && rawRows.length > 0 && rawRows[0]?.type === 'item') {
+    return rawRows.filter((r: any) => r.type === 'item').map((r: any) => r.item || {})
+  }
+  return Array.isArray(rawRows) ? rawRows : []
+}
+
+// ONESQL 查询执行器（BI 卡片用）
+async function executeOnesqlQuery(
+  teamUUID: string,
+  params: any,
+): Promise<{ rows: any[]; total: number; query_time_ms: number }> {
   const startTime = Date.now()
 
   // 构建 ONESQL 语句
@@ -395,50 +491,35 @@ async function executeOnesqlQuery(teamUUID: string, params: any): Promise<{ rows
     return `count(*) as ${m.name || 'count'}`
   })
 
-  const dimExprs = (params.dimensions || []).map((d: any) => `${d.field_key} as ${d.name || d.field_key}`)
+  const dimExprs = (params.dimensions || []).map(
+    (d: any) => `${d.field_key} as ${d.name || d.field_key}`,
+  )
   const selectParts = [...dimExprs, ...metricExprs]
-  const groupByParts = dimExprs.length > 0 ? `GROUP BY ${dimExprs.map((_, i) => i + 1).join(', ')}` : ''
+  const groupByParts =
+    dimExprs.length > 0 ? `GROUP BY ${dimExprs.map((_, i) => i + 1).join(', ')}` : ''
 
-  // WHERE 条件
   const whereParts: string[] = []
-  for (const f of (params.filters || [])) {
+  for (const f of params.filters || []) {
     if (f.operator === 'eq') whereParts.push(`${f.field_key} = '${f.value}'`)
-    else if (f.operator === 'in') whereParts.push(`${f.field_key} IN (${(f.value || []).map((v: string) => `'${v}'`).join(',')})`)
+    else if (f.operator === 'in')
+      whereParts.push(
+        `${f.field_key} IN (${(f.value || []).map((v: string) => `'${v}'`).join(',')})`,
+      )
     else if (f.operator === 'like') whereParts.push(`${f.field_key} LIKE '%${f.value}%'`)
     else if (f.operator === 'gte') whereParts.push(`${f.field_key} >= '${f.value}'`)
     else if (f.operator === 'lte') whereParts.push(`${f.field_key} <= '${f.value}'`)
   }
   const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : ''
 
-  // 排序
   const sortParts = (params.sort || []).map((s: any) => `${s.field_key} ${s.order || 'desc'}`)
   const orderClause = sortParts.length > 0 ? `ORDER BY ${sortParts.join(', ')}` : ''
 
   const limitClause = `LIMIT ${Math.min(params.limit || 1000, 10000)}`
 
-  // 执行 ONESQL
   const onesql = `SELECT ${selectParts.join(', ')} FROM issue ${whereClause} ${groupByParts} ${orderClause} ${limitClause}`
-  Logger.info(`[BI] ONESQL: ${onesql}`)
 
-  try {
-    const res = await OPFetch(
-      `/project/api/project/team/${teamUUID}/onesql/execute`,
-      {
-        method: 'POST',
-        teamUUID,
-        headers: { 'Content-Type': 'application/json' },
-        data: { query: onesql },
-      }
-    ) as any
-
-    const rows = res?.data?.rows || res?.rows || []
-    const total = rows.length
-    return { rows, total, query_time_ms: Date.now() - startTime }
-  } catch (e: any) {
-    Logger.error('[BI] ONESQL execute failed:', e?.message || e)
-    // 降级：返回空结果而非 500，前端展示空态
-    return { rows: [], total: 0, query_time_ms: Date.now() - startTime }
-  }
+  const rows = await executeOnesql(teamUUID, onesql)
+  return { rows, total: rows.length, query_time_ms: Date.now() - startTime }
 }
 
 // ============================================================
@@ -451,7 +532,7 @@ export async function biDetail(req: any): Promise<PluginResponse> {
   const { dataset_uuid, filters, page, page_size } = b
   if (!dataset_uuid) return { body: { error: '缺少 dataset_uuid' }, statusCode: 400 }
 
-  const ds = await datasetEntity.get(dataset_uuid) as any
+  const ds = (await datasetEntity.get(dataset_uuid)) as any
   if (!ds) return { body: { error: '数据集不存在' }, statusCode: 404 }
 
   const pageNum = page || 1
@@ -460,9 +541,12 @@ export async function biDetail(req: any): Promise<PluginResponse> {
 
   // 构建明细查询
   const whereParts: string[] = []
-  for (const f of (filters || [])) {
+  for (const f of filters || []) {
     if (f.operator === 'eq') whereParts.push(`${f.field_key} = '${f.value}'`)
-    else if (f.operator === 'in') whereParts.push(`${f.field_key} IN (${(f.value || []).map((v: string) => `'${v}'`).join(',')})`)
+    else if (f.operator === 'in')
+      whereParts.push(
+        `${f.field_key} IN (${(f.value || []).map((v: string) => `'${v}'`).join(',')})`,
+      )
     else if (f.operator === 'like') whereParts.push(`${f.field_key} LIKE '%${f.value}%'`)
   }
   const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : ''
@@ -471,15 +555,17 @@ export async function biDetail(req: any): Promise<PluginResponse> {
   Logger.info(`[BI] detail ONESQL: ${onesql}`)
 
   try {
-    const res = await OPFetch(
-      `/project/api/project/team/${teamUUID}/onesql/execute`,
-      { method: 'POST', teamUUID, headers: { 'Content-Type': 'application/json' }, data: { query: onesql } }
-    ) as any
-    const rows = res?.data?.rows || res?.rows || []
+    const rows = await executeOnesql(teamUUID, onesql)
     return { body: { data: { rows, page: pageNum, page_size: pageSize, total: rows.length } } }
   } catch (e: any) {
     Logger.error('[BI] detail ONESQL failed:', e?.message || e)
-    return { body: { data: { rows: [], page: pageNum, page_size: pageSize, total: 0 } } }
+    return {
+      body: {
+        error: `ONESQL 查询失败: ${e?.message || String(e)}`,
+        detail: e?.response?.data || undefined,
+      },
+      statusCode: 500,
+    }
   }
 }
 
@@ -489,20 +575,32 @@ export async function biDetail(req: any): Promise<PluginResponse> {
 
 export async function getMetadata(req: any): Promise<PluginResponse> {
   const teamUUID = getParam(req, 'teamUUID')
+
   // 返回可用字段定义
-  return { body: { data: {
-    fields: [
-      { key: 'title', label: '标题', type: 'text', dimension: false, metric: false },
-      { key: 'issue_type', label: '工作项类型', type: 'text', dimension: true, metric: false },
-      { key: 'status', label: '状态', type: 'text', dimension: true, metric: false },
-      { key: 'assignee', label: '负责人', type: 'user', dimension: true, metric: false },
-      { key: 'project', label: '所属项目', type: 'text', dimension: true, metric: false },
-      { key: 'sprint', label: '所属迭代', type: 'text', dimension: true, metric: false },
-      { key: 'priority', label: '优先级', type: 'text', dimension: true, metric: false },
-      { key: 'created_at', label: '创建时间', type: 'date', dimension: true, metric: false },
-      { key: 'issue_count', label: '工作项计数', type: 'number', dimension: false, metric: true, aggregation: 'count' },
-    ],
-  } } }
+  return {
+    body: {
+      data: {
+        fields: [
+          { key: 'title', label: '标题', type: 'text', dimension: false, metric: false },
+          { key: 'issue_type', label: '工作项类型', type: 'text', dimension: true, metric: false },
+          { key: 'status', label: '状态', type: 'text', dimension: true, metric: false },
+          { key: 'assignee', label: '负责人', type: 'user', dimension: true, metric: false },
+          { key: 'project', label: '所属项目', type: 'text', dimension: true, metric: false },
+          { key: 'sprint', label: '所属迭代', type: 'text', dimension: true, metric: false },
+          { key: 'priority', label: '优先级', type: 'text', dimension: true, metric: false },
+          { key: 'created_at', label: '创建时间', type: 'date', dimension: true, metric: false },
+          {
+            key: 'issue_count',
+            label: '工作项计数',
+            type: 'number',
+            dimension: false,
+            metric: true,
+            aggregation: 'count',
+          },
+        ],
+      },
+    },
+  }
 }
 
 // ============================================================
