@@ -478,7 +478,7 @@ async function executeOnesql(
   variables: unknown[] = [],
 ): Promise<any[]> {
   Logger.info(`[BI] ONESQL: ${query}`)
-  const res = (await FetchAsAdmin('/onesql/query', {
+  const res = (await FetchAsAdmin('/openapi/v3alpha/onesql/query', {
     method: 'POST',
     params: { teamID: teamUUID },
     data: { query, variables },
