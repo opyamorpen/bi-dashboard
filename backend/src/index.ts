@@ -200,7 +200,7 @@ export function UnInstall() {
 }
 
 export async function Enable() {
-  Logger.info('[BI] Enable — v0.1.0')
+  Logger.info('[BI] Enable — v0.4.15 full-data-only query mode')
 }
 
 export function Upgrade(oldVersion: any) {
@@ -555,10 +555,19 @@ async function executeOnesql(
   const innerData = resData?.data
 
   const debug = {
+    provider: 'onesql',
     httpStatus: res?.status,
     onesqlResult: result,
     responseKeys: resData ? Object.keys(resData) : null,
-    error: resData?.error || resData?.message || resData?.reason || null,
+    error:
+      resData?.error_msg ||
+      resData?.error ||
+      resData?.message ||
+      resData?.reason ||
+      resData?.error_code ||
+      null,
+    errorCode: resData?.error_code || null,
+    errorData: resData?.error_data ? JSON.stringify(resData.error_data).slice(0, 500) : null,
     innerKeys: innerData ? Object.keys(innerData) : null,
     innerDataPreview: null as any,
   }
@@ -605,9 +614,9 @@ async function executeOnesql(
       debug,
     }
   }
-  // { type: "aggregation", aggregation: {...} } → 提取 aggregation
-  if (rawRows.length > 0 && rawRows[0]?.type === 'aggregation') {
-    return { rows: rawRows.map((r: any) => r.aggregation || {}), debug }
+  // { type: "aggregate", aggregate: {...} } / { type: "aggregation", aggregation: {...} }
+  if (rawRows.length > 0 && (rawRows[0]?.type === 'aggregate' || rawRows[0]?.type === 'aggregation')) {
+    return { rows: rawRows.map((r: any) => r.aggregate || r.aggregation || {}), debug }
   }
   return { rows: Array.isArray(rawRows) ? rawRows : [], debug }
 }
@@ -664,29 +673,20 @@ async function executeOnesqlQuery(
   try {
     onesqlResult = await executeOnesql(teamUUID, onesql)
   } catch (e: any) {
-    if (params.source_type === 'issue') {
-      const fallback = await executeIssueFallbackQuerySafely(teamUUID, params, {
-        provider: 'onesql',
-        error: e?.message || String(e),
-        detail: e?.response?.data || null,
-      })
-      return {
-        rows: fallback.rows,
-        total: fallback.rows.length,
-        query_time_ms: Date.now() - startTime,
-        debug: fallback.debug,
-      }
-    }
-    throw e
+    throw new Error(
+      `ONESQL 全量查询失败: ${e?.message || String(e)}${
+        e?.response?.data ? `; detail=${JSON.stringify(e.response.data).slice(0, 500)}` : ''
+      }`,
+    )
   }
   if (onesqlResult.debug?.onesqlResult === 'FAIL' && params.source_type === 'issue') {
-    const fallback = await executeIssueFallbackQuerySafely(teamUUID, params, onesqlResult.debug)
-    return {
-      rows: fallback.rows,
-      total: fallback.rows.length,
-      query_time_ms: Date.now() - startTime,
-      debug: fallback.debug,
-    }
+    throw new Error(
+      `ONESQL 全量查询返回 FAIL: ${
+        onesqlResult.debug?.error ||
+        onesqlResult.debug?.innerDataPreview ||
+        JSON.stringify(onesqlResult.debug).slice(0, 500)
+      }`,
+    )
   }
 
   return {

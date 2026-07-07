@@ -51,82 +51,207 @@ interface Props {
   onCopy: () => void
 }
 
-function readTaskField(task: any, key: string): string {
-  const value = task?.[key]
-  if (value && typeof value === 'object') return value.name || value.title || value.uuid || ''
-  if (value !== undefined && value !== null && value !== '') return String(value)
-  if (key === 'issue_type') return task?.issueType?.name || ''
-  if (key === 'status') return task?.status?.name || ''
-  if (key === 'assignee') return task?.assign?.name || task?.owner?.name || ''
-  if (key === 'project_uuid') return task?.project?.name || task?.project?.uuid || ''
-  if (key === 'title') return task?.title || task?.name || ''
-  return ''
+const ONESQL_FIELD_MAP: Record<string, string> = {
+  uuid: 'uuid',
+  title: 'field001',
+  issue_type: 'field007',
+  status: 'field005',
+  assignee: 'field004',
+  priority: 'field012',
+  project_uuid: 'field006',
+  created_at: 'field009',
 }
 
-function normalizeTask(task: any): any {
-  return {
-    uuid: task.uuid || '',
-    title: task.title || task.name || task.uuid || '-',
-    issue_type: task.issueType?.name || '',
-    status: task.status?.name || '',
-    assignee: task.assign?.name || task.owner?.name || '',
-    priority: '',
-    project_uuid: task.project?.name || task.project?.uuid || '',
-    created_at: '',
+const DEFAULT_WORKITEM_HIERARCHY = {
+  lock_query: '',
+  perspective: false,
+  flat: false,
+  path: { upstream_field: 'field014', downstream_field: 'field114' },
+  config: {
+    field: 'field007',
+    tree: {
+      uuids: ['__ALL__'],
+      children: [
+        {
+          uuids: ['__ALL__'],
+          children: [
+            {
+              uuids: ['__ALL__'],
+              children: [
+                {
+                  uuids: ['__ALL__'],
+                  children: [
+                    {
+                      uuids: ['__ALL__'],
+                      children: [
+                        {
+                          uuids: ['__ALL__'],
+                          children: [
+                            {
+                              uuids: ['__ALL__'],
+                              children: [
+                                {
+                                  uuids: ['__ALL__'],
+                                  children: [
+                                    {
+                                      uuids: ['__ALL__'],
+                                      children: [{ uuids: ['__ALL__'] }],
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  },
+}
+
+function escapeOnesqlValue(value: any): string {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+}
+
+function getOnesqlField(fieldKey: string): string {
+  const mapped = ONESQL_FIELD_MAP[fieldKey]
+  if (!mapped) throw new Error(`暂不支持字段 ${fieldKey} 的全量查询`)
+  return mapped
+}
+
+function buildWhereClause(filters: any[] = []): string {
+  const parts: string[] = []
+  for (const f of filters) {
+    const field = getOnesqlField(f.field_key)
+    if (f.operator === 'eq') parts.push(`${field} = '${escapeOnesqlValue(f.value)}'`)
+    else if (f.operator === 'in') {
+      const values = Array.isArray(f.value) ? f.value : []
+      parts.push(`${field} IN (${values.map((v: any) => `'${escapeOnesqlValue(v)}'`).join(',')})`)
+    } else if (f.operator === 'like') {
+      parts.push(`${field} LIKE '%${escapeOnesqlValue(f.value)}%'`)
+    } else if (f.operator === 'gte') {
+      parts.push(`${field} >= '${escapeOnesqlValue(f.value)}'`)
+    } else if (f.operator === 'lte') {
+      parts.push(`${field} <= '${escapeOnesqlValue(f.value)}'`)
+    }
   }
+  return parts.length > 0 ? ` where ${parts.join(' AND ')}` : ''
 }
 
-async function queryTasksFallback(chartType: string, query: any): Promise<any> {
+function parseWorkitemsOnesqlRows(json: any): any[] {
+  const rows = json?.data?.data || json?.data || []
+  return Array.isArray(rows) ? rows : []
+}
+
+async function executeBrowserWorkitemsOnesql(queryText: string): Promise<any[]> {
   const teamUUID = getTeamUUID()
-  const res = await fetch(`/project/api/project/team/${teamUUID}/items/graphql?t=bi_dashboard_fallback`, {
+  if (!teamUUID) throw new Error('未获取到团队 UUID，无法执行全量 ONESQL 查询')
+  const res = await fetch(`/project/api/ones-project/team/${teamUUID}/workitems/onesql`, {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      query: `{
-        tasks(limit: ${Math.min(query.limit || 100, 1000)}) {
-          uuid
-          name
-          title
-          project { uuid name key identifier }
-          issueType { uuid name }
-          status { uuid name }
-          assign { uuid name }
-          owner { uuid name }
-        }
-      }`,
-      variables: {},
-    }),
+    headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+    body: JSON.stringify({ query: queryText, hierarchy: DEFAULT_WORKITEM_HIERARCHY }),
   })
-  if (!res.ok) throw new Error(`GraphQL fallback HTTP ${res.status}`)
-  const json = await res.json()
-  const tasks = Array.isArray(json?.data?.tasks) ? json.data.tasks : []
-  const metricName = query.metrics?.[0]?.name || 'count'
-
-  if (chartType === 'table') return { rows: tasks.map(normalizeTask), total: tasks.length }
-  if (chartType === 'number') return { rows: [{ [metricName]: tasks.length }], total: tasks.length }
-
-  const dim = query.dimensions?.[0]
-  if (!dim) return { rows: [{ [metricName]: tasks.length }], total: tasks.length }
-
-  const dimKey = dim.field_key || dim.name
-  const outKey = dim.name || dimKey
-  const grouped: Record<string, number> = {}
-  for (const task of tasks) {
-    const key = readTaskField(task, dimKey) || '未设置'
-    grouped[key] = (grouped[key] || 0) + 1
+  const text = await res.text()
+  let json: any = null
+  try {
+    json = text ? JSON.parse(text) : null
+  } catch {
+    throw new Error(`ONESQL 全量查询返回非 JSON: ${text.substring(0, 300)}`)
   }
-  const rows = Object.entries(grouped)
-    .map(([key, count]) => ({ [outKey]: key, [metricName]: count }))
-    .sort((a, b) => Number(b[metricName]) - Number(a[metricName]))
-  return { rows, total: tasks.length }
+  if (!res.ok) throw new Error(`ONESQL 全量查询 HTTP ${res.status}: ${text.substring(0, 500)}`)
+  return parseWorkitemsOnesqlRows(json)
+}
+
+function normalizeWorkitemItem(item: any): any {
+  return {
+    uuid: item.uuid || '',
+    title: item.field001 || item.title || item.name || item.uuid || '-',
+    issue_type: item.field007?.name || '',
+    status: item.field005?.name || '',
+    assignee: item.field004?.name || '',
+    priority: item.field012?.name || '',
+    project_uuid: item.field006?.uuid || '',
+    created_at: item.field009 || '',
+  }
+}
+
+function readAggregateValue(row: any, key: string): any {
+  const value = row[key]
+  if (value && typeof value === 'object') return value.name || value.uuid || value.value || '未设置'
+  return value || '未设置'
+}
+
+async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promise<any> {
+  const startedAt = Date.now()
+  const metricName = query.metrics?.[0]?.name || 'count'
+  const limit = Math.min(Math.max(query.limit || 100, 1), 1000)
+  const whereClause = buildWhereClause(query.filters || [])
+
+  if (chartType === 'number' || !query.dimensions?.length) {
+    const queryText = `select count() as total_count from issue${whereClause} limit 10000000000`
+    const rows = await executeBrowserWorkitemsOnesql(queryText)
+    const aggregate = rows.find((r: any) => r.type === 'aggregate' || r.type === 'aggregation')?.aggregate
+      || rows.find((r: any) => r.type === 'aggregation')?.aggregation
+      || rows[0]?.aggregate
+      || rows[0]?.aggregation
+      || {}
+    const total = Number(aggregate.total_count ?? aggregate[metricName] ?? aggregate.count ?? 0)
+    return {
+      rows: [{ [metricName]: total }],
+      total,
+      query_time_ms: Date.now() - startedAt,
+      debug: { provider: 'workitems_onesql', query: queryText },
+    }
+  }
+
+  if (chartType === 'table') {
+    const queryText = `select uid(uuid, uuid as path, field001, field007.name, field005.name, field006.uuid, field009) from issue${whereClause} limit 0, ${limit}`
+    const rows = await executeBrowserWorkitemsOnesql(queryText)
+    const items = rows.filter((r: any) => r.type === 'item').map((r: any) => normalizeWorkitemItem(r.item || {}))
+    return {
+      rows: items,
+      total: items.length,
+      query_time_ms: Date.now() - startedAt,
+      debug: { provider: 'workitems_onesql', query: queryText },
+    }
+  }
+
+  const dim = query.dimensions[0]
+  const dimKey = dim.field_key || dim.name
+  const dimField = getOnesqlField(dimKey)
+  const outKey = dim.name || dimKey
+  const queryText = `select ${dimField} as ${outKey}, count() as total_count from issue${whereClause} group by ${dimField} limit 0, ${limit}`
+  const rows = await executeBrowserWorkitemsOnesql(queryText)
+  const aggregates = rows
+    .flatMap((r: any) => {
+      if (Array.isArray(r.group_aggregate)) return r.group_aggregate
+      if (r.type === 'aggregate' || r.type === 'aggregation') return [r.aggregate || r.aggregation || {}]
+      return []
+    })
+    .map((r: any) => ({
+      [outKey]: readAggregateValue(r, outKey),
+      [metricName]: Number(r[metricName] ?? r.total_count ?? r.count ?? 0),
+    }))
+    .sort((a: any, b: any) => Number(b[metricName]) - Number(a[metricName]))
+  return {
+    rows: aggregates,
+    total: aggregates.reduce((sum: number, row: any) => sum + (Number(row[metricName]) || 0), 0),
+    query_time_ms: Date.now() - startedAt,
+    debug: { provider: 'workitems_onesql', query: queryText },
+  }
 }
 
 function getDataSourceLabel(provider?: string): string {
-  if (provider === 'browser_graphql_tasks_fallback') return '浏览器 GraphQL'
-  if (provider === 'graphql_tasks_fallback') return '后端 GraphQL'
-  if (provider === 'graphql_tasks_fallback_failed') return '浏览器兜底'
   if (provider === 'onesql') return 'ONESQL'
+  if (provider === 'workitems_onesql') return 'ONESQL（全量真实数据）'
   return '实时查询'
 }
 
@@ -160,29 +285,24 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
         sort: query.sort || [],
         limit: query.limit || 100,
       })
-      if (
-        res.data?.debug?.onesqlResult === 'FAIL' ||
-        res.data?.debug?.provider === 'graphql_tasks_fallback_failed'
-      ) {
-        const fallbackData = await queryTasksFallback(card.chart_type, query)
-        setData(fallbackData)
-        setQueryTimeMs(Date.now() - startedAt)
-        setDataSource(getDataSourceLabel('browser_graphql_tasks_fallback'))
-      } else {
-        setData(res.data)
-        setQueryTimeMs(res.data?.query_time_ms ?? Date.now() - startedAt)
-        setDataSource(getDataSourceLabel(res.data?.debug?.provider))
-      }
+      setData(res.data)
+      setQueryTimeMs(res.data?.query_time_ms ?? Date.now() - startedAt)
+      setDataSource(getDataSourceLabel(res.data?.debug?.provider))
       setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
     } catch (e: any) {
       try {
-        const fallbackData = await queryTasksFallback(card.chart_type, query)
-        setData(fallbackData)
-        setQueryTimeMs(Date.now() - startedAt)
-        setDataSource(getDataSourceLabel('browser_graphql_tasks_fallback'))
+        const browserOnesqlData = await queryBrowserWorkitemsOnesql(card.chart_type, query)
+        setData(browserOnesqlData)
+        setQueryTimeMs(browserOnesqlData.query_time_ms ?? Date.now() - startedAt)
+        setDataSource(getDataSourceLabel(browserOnesqlData.debug?.provider))
         setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
       } catch (fallbackError: any) {
-        setError(fallbackError.message || e.message || '查询失败')
+        setData(null)
+        setError(
+          fallbackError.message
+            ? `${fallbackError.message}；后端错误：${e.message || '未知'}`
+            : e.message || '查询失败：未获取到全量真实数据',
+        )
         setQueryTimeMs(Date.now() - startedAt)
       }
     } finally {
