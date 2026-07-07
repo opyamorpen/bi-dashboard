@@ -200,7 +200,7 @@ export function UnInstall() {
 }
 
 export async function Enable() {
-  Logger.info('[BI] Enable — v0.4.19 constrains chart card height with scrollable long lists')
+  Logger.info('[BI] Enable — v0.4.20 adds draggable grid dashboard layout')
 }
 
 export function Upgrade(oldVersion: any) {
@@ -337,7 +337,7 @@ export async function createCard(req: any): Promise<PluginResponse> {
     dataset_uuid: b.dataset_uuid || '',
     query_json: JSON.stringify(b.query || {}),
     style_json: JSON.stringify(b.style || {}),
-    layout: b.layout || { x: 0, y: 0, w: 4, h: 3 },
+    layout: b.layout || { x: 0, y: 0, w: 16, h: 12 },
   }
   cards.push(newCard)
   await dashboardEntity.set(

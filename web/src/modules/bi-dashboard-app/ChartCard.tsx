@@ -2,14 +2,15 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { apiPost, getTeamUUID } from '../../api'
 
 const S: any = {
-  card: { background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8', overflow: 'hidden', alignSelf: 'start' },
+  card: { background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8', overflow: 'hidden', alignSelf: 'start', height: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' as any },
   cardHeader: { padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  cardHeaderDraggable: { cursor: 'move', userSelect: 'none' as any },
   cardTitle: { fontSize: 14, fontWeight: 600 },
   headerActions: { display: 'flex', alignItems: 'center', gap: 8 },
   actionBtn: { border: 'none', background: 'transparent', cursor: 'pointer', color: '#1677ff', fontSize: 12, padding: 0 },
-  cardBody: { padding: 16 },
-  chartViewport: { maxHeight: 360, overflowY: 'auto' as any, overflowX: 'hidden' as any, paddingRight: 4 },
-  chartViewportCompact: { maxHeight: 220, overflow: 'hidden' },
+  cardBody: { padding: 16, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
+  chartViewport: { flex: 1, minHeight: 0, overflowY: 'auto' as any, overflowX: 'hidden' as any, paddingRight: 4 },
+  chartViewportCompact: { flex: 1, minHeight: 0, overflow: 'hidden' },
   cardMeta: { marginTop: 12, paddingTop: 10, borderTop: '1px solid #f5f5f5', color: '#999', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' as any },
   loading: { textAlign: 'center', padding: 40, color: '#999', fontSize: 13 },
   error: { textAlign: 'center', padding: 40, color: '#ff4d4f', fontSize: 13 },
@@ -56,6 +57,7 @@ interface Props {
   dashboardUuid: string
   onDelete: () => void
   onCopy: () => void
+  onDragStart?: (e: React.MouseEvent) => void
 }
 
 const ONESQL_FIELD_MAP: Record<string, string> = {
@@ -495,7 +497,7 @@ function getDataSourceLabel(provider?: string): string {
   return '实时查询'
 }
 
-export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCopy }) => {
+export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCopy, onDragStart }) => {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -686,9 +688,12 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
 
   return (
     <div style={S.card}>
-      <div style={S.cardHeader}>
+      <div
+        style={{ ...S.cardHeader, ...(onDragStart ? S.cardHeaderDraggable : {}) }}
+        onMouseDown={onDragStart}
+      >
         <span style={S.cardTitle}>{card.title}</span>
-        <div style={S.headerActions}>
+        <div style={S.headerActions} onMouseDown={(e) => e.stopPropagation()}>
           <button style={S.actionBtn} onClick={loadData} disabled={loading}>刷新</button>
           <button style={S.actionBtn} onClick={onCopy}>复制</button>
           <button style={S.deleteBtn} onClick={onDelete}>删除</button>

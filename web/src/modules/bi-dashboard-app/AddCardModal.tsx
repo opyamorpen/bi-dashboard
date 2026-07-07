@@ -73,6 +73,12 @@ function getDefaultLimit(chartType: string): number {
   return 100
 }
 
+function getDefaultLayout(chartType: string): any {
+  if (chartType === 'number') return { x: 0, y: 0, w: 16, h: 9 }
+  if (chartType === 'bar' || chartType === 'table') return { x: 0, y: 0, w: 16, h: 16 }
+  return { x: 0, y: 0, w: 16, h: 12 }
+}
+
 function pickDefaultDimension(fields: any[]): string {
   const preferred = ['status', 'issue_type', 'assignee', 'project_uuid']
   for (const key of preferred) {
@@ -157,7 +163,7 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
         limit: Math.min(Math.max(Number(topN) || getDefaultLimit(chartType), 1), 1000),
       },
       style: {},
-      layout: { x: 0, y: 0, w: 6, h: 4 },
+      layout: getDefaultLayout(chartType),
     })
   }
 
