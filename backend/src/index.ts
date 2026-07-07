@@ -200,7 +200,7 @@ export function UnInstall() {
 }
 
 export async function Enable() {
-  Logger.info('[BI] Enable — v0.4.16 default dataset uses full workitems ONESQL first')
+  Logger.info('[BI] Enable — v0.4.17 hydrates readable dimension labels for full workitems ONESQL')
 }
 
 export function Upgrade(oldVersion: any) {

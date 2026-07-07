@@ -64,6 +64,23 @@ const ONESQL_FIELD_MAP: Record<string, string> = {
   created_at: 'field009',
 }
 
+const FIELD_LABEL_MAP: Record<string, string> = {
+  uuid: '工作项UUID',
+  title: '标题',
+  issue_type: '工作项类型',
+  status: '状态',
+  assignee: '负责人',
+  priority: '优先级',
+  project_uuid: '项目',
+  created_at: '创建时间',
+  count: '计数',
+  total_count: '计数',
+}
+
+const LABEL_HYDRATION_DIMENSIONS = new Set(['issue_type', 'status', 'assignee', 'priority', 'project_uuid'])
+const LABEL_HYDRATION_LOOKUP_LIMIT = 50
+const dimensionLabelCache = new Map<string, Map<string, string>>()
+
 const DEFAULT_WORKITEM_HIERARCHY = {
   lock_query: '',
   perspective: false,
@@ -191,6 +208,104 @@ function readAggregateValue(row: any, key: string): any {
   return value || '未设置'
 }
 
+function getDimensionOutputKey(query: any, fallback: string): string {
+  const dim = query.dimensions?.[0]
+  return dim?.name || dim?.field_key || fallback
+}
+
+function findDisplayName(value: any): string {
+  if (!value) return ''
+  if (typeof value === 'string') return ''
+  if (typeof value !== 'object') return ''
+  if (typeof value.name === 'string' && value.name) return value.name
+  for (const [key, nested] of Object.entries(value)) {
+    if (/name$/i.test(key) && typeof nested === 'string' && nested) return nested
+  }
+  for (const nested of Object.values(value)) {
+    const found = findDisplayName(nested)
+    if (found) return found
+  }
+  return ''
+}
+
+function getDimensionLabelCache(dimKey: string): Map<string, string> {
+  let cache = dimensionLabelCache.get(dimKey)
+  if (!cache) {
+    cache = new Map<string, string>()
+    dimensionLabelCache.set(dimKey, cache)
+  }
+  return cache
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = []
+  let cursor = 0
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      results[index] = await worker(items[index])
+    }
+  })
+  await Promise.all(runners)
+  return results
+}
+
+async function fetchDimensionLabel(dimKey: string, dimField: string, value: string): Promise<string> {
+  if (!value || value === '未设置') return value
+  const cache = getDimensionLabelCache(dimKey)
+  const cached = cache.get(value)
+  if (cached) return cached
+
+  try {
+    const queryText = `select uid(uuid, ${dimField}.name) from issue where ${dimField} = '${escapeOnesqlValue(value)}' limit 0, 1`
+    const rows = await executeBrowserWorkitemsOnesql(queryText)
+    for (const row of rows) {
+      if (row?.type !== 'item') continue
+      const label = findDisplayName(row.item?.[dimField])
+      if (label) {
+        cache.set(value, label)
+        return label
+      }
+    }
+  } catch {
+    /* keep the original value when a label lookup fails */
+  }
+
+  cache.set(value, value)
+  return value
+}
+
+async function hydrateAggregateLabels(
+  aggregates: any[],
+  dimKey: string,
+  dimField: string,
+  outKey: string,
+): Promise<any[]> {
+  if (!LABEL_HYDRATION_DIMENSIONS.has(dimKey) || aggregates.length === 0) return aggregates
+  const values = Array.from(
+    new Set(
+      aggregates
+        .map((row: any) => String(row[outKey] || ''))
+        .filter((value) => value && value !== '未设置'),
+    ),
+  ).slice(0, LABEL_HYDRATION_LOOKUP_LIMIT)
+  if (values.length === 0) return aggregates
+
+  const entries = await mapWithConcurrency(values, 6, async (value) => [
+    value,
+    await fetchDimensionLabel(dimKey, dimField, value),
+  ] as [string, string])
+  const labels = new Map(entries)
+  return aggregates.map((row: any) => ({
+    ...row,
+    [outKey]: labels.get(String(row[outKey] || '')) || row[outKey],
+  }))
+}
+
 async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promise<any> {
   const startedAt = Date.now()
   const metricName = query.metrics?.[0]?.name || 'count'
@@ -232,7 +347,7 @@ async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promi
   const outKey = dim.name || dimKey
   const queryText = `select ${dimField} as ${outKey}, count() as total_count from issue${whereClause} group by ${dimField} limit 0, ${limit}`
   const rows = await executeBrowserWorkitemsOnesql(queryText)
-  const aggregates = rows
+  const rawAggregates = rows
     .flatMap((r: any) => {
       if (Array.isArray(r.group_aggregate)) return r.group_aggregate
       if (r.type === 'aggregate' || r.type === 'aggregation') return [r.aggregate || r.aggregation || {}]
@@ -243,6 +358,7 @@ async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promi
       [metricName]: Number(r[metricName] ?? r.total_count ?? r.count ?? 0),
     }))
     .sort((a: any, b: any) => Number(b[metricName]) - Number(a[metricName]))
+  const aggregates = await hydrateAggregateLabels(rawAggregates, dimKey, dimField, outKey)
   return {
     rows: aggregates,
     total: aggregates.reduce((sum: number, row: any) => sum + (Number(row[metricName]) || 0), 0),
@@ -348,7 +464,7 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
     }
 
     if (chartType === 'bar') {
-      const dimKey = query.dimensions?.[0]?.field_key || query.dimensions?.[0]?.name || Object.keys(rows[0])[0]
+      const dimKey = getDimensionOutputKey(query, Object.keys(rows[0])[0])
       const metricKey = query.metrics?.[0]?.name || 'count'
       const maxVal = Math.max(...rows.map((r: any) => Number(r[metricKey]) || 0), 1)
       return (
@@ -367,7 +483,7 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
     }
 
     if (chartType === 'pie') {
-      const dimKey = query.dimensions?.[0]?.field_key || query.dimensions?.[0]?.name || Object.keys(rows[0])[0]
+      const dimKey = getDimensionOutputKey(query, Object.keys(rows[0])[0])
       const metricKey = query.metrics?.[0]?.name || 'count'
       const visibleRows = rows.slice(0, 8)
       const total = visibleRows.reduce((sum: number, r: any) => sum + (Number(r[metricKey]) || 0), 0)
@@ -408,7 +524,7 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
       return (
         <div style={{ overflowX: 'auto' }}>
           <table style={S.table}>
-            <thead><tr>{cols.map((c) => <th key={c} style={S.th}>{c}</th>)}</tr></thead>
+            <thead><tr>{cols.map((c) => <th key={c} style={S.th}>{FIELD_LABEL_MAP[c] || c}</th>)}</tr></thead>
             <tbody>
               {rows.slice(0, 50).map((r: any, i: number) => (
                 <tr key={i}>{cols.map((c) => <td key={c} style={S.td}>{String(r[c] ?? '-')}</td>)}</tr>
