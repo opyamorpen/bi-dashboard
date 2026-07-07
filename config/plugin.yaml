@@ -2,7 +2,7 @@ service:
   app_id: 8SHK4cQv
   name: BI仪表盘
   description: 团队级BI数据分析插件。支持自定义仪表盘、数据集、图表卡片、下钻明细和权限控制。
-  version: 0.4.0
+  version: 0.4.1
   mode: org
   logo: null
   language: nodejs
@@ -13,12 +13,6 @@ service:
   auth: null
   config: null
   scope: 1
-  oauth:
-    type:
-      - admin
-    scope:
-      - read:onesql:query
-      - read:project:issue
   policy:
     policy: standard
     target: ''
@@ -29,6 +23,11 @@ service:
     - name: 创建 BI 仪表盘
       field: bi_create_dashboard
       desc: 允许创建新的BI仪表盘
+oauth:
+  type:
+    - admin
+  scope:
+    - read:project:issue
 modules:
   - id: bi-dashboard-app
     moduleType: ones:app:new

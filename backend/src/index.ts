@@ -364,6 +364,20 @@ export async function createDataset(req: any): Promise<PluginResponse> {
   if (!b.name) return { body: { error: '缺少数据集名称' }, statusCode: 400 }
   const uuid = makeUuid()
   const now = Date.now()
+
+  // 默认工作项字段配置（当用户未指定 fields 时使用）
+  const defaultIssueFields = [
+    { key: 'uuid', label: '工作项UUID', type: 'text', dimension: false, metric: false },
+    { key: 'title', label: '标题', type: 'text', dimension: true, metric: false },
+    { key: 'issue_type', label: '工作项类型', type: 'text', dimension: true, metric: false },
+    { key: 'status', label: '状态', type: 'text', dimension: true, metric: false },
+    { key: 'assignee', label: '负责人', type: 'text', dimension: true, metric: false },
+    { key: 'priority', label: '优先级', type: 'text', dimension: true, metric: false },
+    { key: 'project_uuid', label: '项目', type: 'text', dimension: true, metric: false },
+    { key: 'created_at', label: '创建时间', type: 'datetime', dimension: true, metric: false },
+  ]
+  const fields = b.fields && b.fields.length > 0 ? b.fields : defaultIssueFields
+
   await datasetEntity.set(
     uuid,
     cleanForSet({
@@ -372,7 +386,7 @@ export async function createDataset(req: any): Promise<PluginResponse> {
       name: b.name,
       source_type: b.source_type || 'issue',
       owner_uuid: operator,
-      field_config_json: JSON.stringify(b.fields || []),
+      field_config_json: JSON.stringify(fields),
       base_filter_json: JSON.stringify(b.base_filter || {}),
       description: b.description || '',
       created_by: operator,
@@ -443,8 +457,15 @@ export async function biQuery(req: any): Promise<PluginResponse> {
       },
     }
   } catch (e: any) {
-    Logger.error('[BI] biQuery error:', e?.message || e)
-    return { body: { error: `查询失败: ${e?.message || e}` }, statusCode: 500 }
+    Logger.error('[BI] biQuery error:', e?.response?.data || e?.message || e)
+    return {
+      body: {
+        error: 'ONESQL 查询失败',
+        message: e?.message || String(e),
+        detail: e?.response?.data || null,
+      },
+      statusCode: 500,
+    }
   }
 }
 
@@ -514,7 +535,8 @@ async function executeOnesqlQuery(
   const sortParts = (params.sort || []).map((s: any) => `${s.field_key} ${s.order || 'desc'}`)
   const orderClause = sortParts.length > 0 ? `ORDER BY ${sortParts.join(', ')}` : ''
 
-  const limitClause = `LIMIT ${Math.min(params.limit || 1000, 10000)}`
+  const size = Math.min(params.limit || 1000, 10000)
+  const limitClause = `LIMIT 0, ${size}`
 
   const onesql = `SELECT ${selectParts.join(', ')} FROM issue ${whereClause} ${groupByParts} ${orderClause} ${limitClause}`
 
@@ -551,7 +573,7 @@ export async function biDetail(req: any): Promise<PluginResponse> {
   }
   const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : ''
 
-  const onesql = `SELECT uuid, title, issue_type, status, assignee, project_uuid, priority, created_at FROM issue ${whereClause} LIMIT ${pageSize} OFFSET ${offset}`
+  const onesql = `SELECT uuid, title, issue_type, status, assignee, project_uuid, priority, created_at FROM issue ${whereClause} LIMIT ${offset}, ${pageSize}`
   Logger.info(`[BI] detail ONESQL: ${onesql}`)
 
   try {
