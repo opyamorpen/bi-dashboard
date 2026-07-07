@@ -91,13 +91,17 @@ function getParam(req: any, name: string): string {
 }
 
 async function writeAudit(teamUUID: string, objectType: string, objectUuid: string, action: string, operator: string, detail: any) {
-  const k = `${teamUUID}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-  await auditLog.set(k, cleanForSet({
-    log_uuid: k, team_uuid: teamUUID, object_type: objectType,
-    object_uuid: objectUuid, action, operator_uuid: operator,
-    detail_json: typeof detail === 'string' ? detail : JSON.stringify(detail),
-    created_at: Date.now(),
-  }))
+  try {
+    const k = `${teamUUID}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    await auditLog.set(k, cleanForSet({
+      log_uuid: k, team_uuid: teamUUID, object_type: objectType,
+      object_uuid: objectUuid, action, operator_uuid: operator,
+      detail_json: typeof detail === 'string' ? detail : JSON.stringify(detail),
+      created_at: Date.now(),
+    }))
+  } catch (e) {
+    Logger.error('[BI] writeAudit failed:', e)
+  }
 }
 
 // ============================================================
