@@ -453,6 +453,7 @@ export async function biQuery(req: any): Promise<PluginResponse> {
           chart_type,
           dimensions,
           metrics,
+          debug: queryResult.debug,
         },
       },
     }
@@ -476,7 +477,7 @@ async function executeOnesql(
   teamUUID: string,
   query: string,
   variables: unknown[] = [],
-): Promise<any[]> {
+): Promise<{ rows: any[]; debug?: any }> {
   Logger.info(`[BI] ONESQL: ${query}`)
   const res = (await FetchAsAdmin('/openapi/v3alpha/onesql/query', {
     method: 'POST',
@@ -484,19 +485,72 @@ async function executeOnesql(
     data: { query, variables },
   })) as any
 
-  // ONESQL 返回格式: { result: "SUCCESS", data: { data: [{ type: "item", item: {...} }], page_info: {...} } }
-  const rawRows = res?.data?.data || res?.data || []
-  if (Array.isArray(rawRows) && rawRows.length > 0 && rawRows[0]?.type === 'item') {
-    return rawRows.filter((r: any) => r.type === 'item').map((r: any) => r.item || {})
+  // 安全提取返回结构（避免 circular reference）
+  const resData = res?.data
+  const result = resData?.result
+  const innerData = resData?.data
+
+  const debug = {
+    httpStatus: res?.status,
+    onesqlResult: result,
+    innerKeys: innerData ? Object.keys(innerData) : null,
+    innerDataPreview: null as any,
   }
-  return Array.isArray(rawRows) ? rawRows : []
+
+  // 安全序列化 innerData 预览
+  try {
+    if (innerData) {
+      const safe: any = {}
+      for (const k of Object.keys(innerData)) {
+        const v = (innerData as any)[k]
+        if (Array.isArray(v)) {
+          safe[k] =
+            v.length > 0
+              ? `array[${v.length}], first=${JSON.stringify(v[0])?.substring(0, 300)}`
+              : '[]'
+        } else {
+          safe[k] = JSON.stringify(v)?.substring(0, 300)
+        }
+      }
+      debug.innerDataPreview = safe
+    }
+  } catch {
+    /* ignore */
+  }
+
+  Logger.info(`[BI] ONESQL debug: ${JSON.stringify(debug)}`)
+
+  // 提取行数据 — 兼容多种返回格式
+  let rawRows: any[] = []
+  if (innerData) {
+    if (Array.isArray(innerData.data)) {
+      rawRows = innerData.data
+    } else if (Array.isArray(innerData)) {
+      rawRows = innerData
+    } else if (innerData.aggregation) {
+      rawRows = [innerData.aggregation]
+    }
+  }
+
+  // { type: "item", item: {...} } → 提取 item
+  if (rawRows.length > 0 && rawRows[0]?.type === 'item') {
+    return {
+      rows: rawRows.filter((r: any) => r.type === 'item').map((r: any) => r.item || {}),
+      debug,
+    }
+  }
+  // { type: "aggregation", aggregation: {...} } → 提取 aggregation
+  if (rawRows.length > 0 && rawRows[0]?.type === 'aggregation') {
+    return { rows: rawRows.map((r: any) => r.aggregation || {}), debug }
+  }
+  return { rows: Array.isArray(rawRows) ? rawRows : [], debug }
 }
 
 // ONESQL 查询执行器（BI 卡片用）
 async function executeOnesqlQuery(
   teamUUID: string,
   params: any,
-): Promise<{ rows: any[]; total: number; query_time_ms: number }> {
+): Promise<{ rows: any[]; total: number; query_time_ms: number; debug?: any }> {
   const startTime = Date.now()
 
   // 构建 ONESQL 语句
@@ -540,8 +594,13 @@ async function executeOnesqlQuery(
 
   const onesql = `SELECT ${selectParts.join(', ')} FROM issue ${whereClause} ${groupByParts} ${orderClause} ${limitClause}`
 
-  const rows = await executeOnesql(teamUUID, onesql)
-  return { rows, total: rows.length, query_time_ms: Date.now() - startTime }
+  const onesqlResult = await executeOnesql(teamUUID, onesql)
+  return {
+    rows: onesqlResult.rows,
+    total: onesqlResult.rows.length,
+    query_time_ms: Date.now() - startTime,
+    debug: onesqlResult.debug,
+  }
 }
 
 // ============================================================
@@ -577,8 +636,17 @@ export async function biDetail(req: any): Promise<PluginResponse> {
   Logger.info(`[BI] detail ONESQL: ${onesql}`)
 
   try {
-    const rows = await executeOnesql(teamUUID, onesql)
-    return { body: { data: { rows, page: pageNum, page_size: pageSize, total: rows.length } } }
+    const onesqlResult = await executeOnesql(teamUUID, onesql)
+    return {
+      body: {
+        data: {
+          rows: onesqlResult.rows,
+          page: pageNum,
+          page_size: pageSize,
+          total: onesqlResult.rows.length,
+        },
+      },
+    }
   } catch (e: any) {
     Logger.error('[BI] detail ONESQL failed:', e?.message || e)
     return {
