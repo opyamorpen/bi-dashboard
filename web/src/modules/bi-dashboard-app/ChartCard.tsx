@@ -44,6 +44,8 @@ const CHART_COLORS = [
   '#2f54eb',
 ]
 
+const DEFAULT_DATASET_UUID = 'default_issue_dataset'
+
 interface Props {
   card: any
   dashboardUuid: string
@@ -276,6 +278,15 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
     setError('')
     const startedAt = Date.now()
     try {
+      if (card.dataset_uuid === DEFAULT_DATASET_UUID) {
+        const browserOnesqlData = await queryBrowserWorkitemsOnesql(card.chart_type, query)
+        setData(browserOnesqlData)
+        setQueryTimeMs(browserOnesqlData.query_time_ms ?? Date.now() - startedAt)
+        setDataSource(getDataSourceLabel(browserOnesqlData.debug?.provider))
+        setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
+        return
+      }
+
       const res = await apiPost('/bi/query', {
         dataset_uuid: card.dataset_uuid,
         chart_type: card.chart_type,
@@ -291,6 +302,12 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
       setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
     } catch (e: any) {
       try {
+        if (card.dataset_uuid === DEFAULT_DATASET_UUID) {
+          setData(null)
+          setError(e.message || '查询失败')
+          setQueryTimeMs(Date.now() - startedAt)
+          return
+        }
         const browserOnesqlData = await queryBrowserWorkitemsOnesql(card.chart_type, query)
         setData(browserOnesqlData)
         setQueryTimeMs(browserOnesqlData.query_time_ms ?? Date.now() - startedAt)

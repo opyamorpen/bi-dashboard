@@ -200,7 +200,7 @@ export function UnInstall() {
 }
 
 export async function Enable() {
-  Logger.info('[BI] Enable — v0.4.15 full-data-only query mode')
+  Logger.info('[BI] Enable — v0.4.16 default dataset uses full workitems ONESQL first')
 }
 
 export function Upgrade(oldVersion: any) {
