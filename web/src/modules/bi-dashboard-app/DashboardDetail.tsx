@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { apiGet, apiPost, apiDelete } from '../../api'
 import { ChartCard } from './ChartCard'
+import { AddCardModal } from './AddCardModal'
 
 const S: any = {
   container: { background: '#f5f5f5', minHeight: '100vh' },
