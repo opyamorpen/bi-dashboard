@@ -22,6 +22,9 @@ const S: any = {
   barValue: { width: 48, textAlign: 'right' as any, fontWeight: 600, flexShrink: 0 },
   pieWrap: { display: 'flex', gap: 18, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' as any },
   pie: { width: 150, height: 150, borderRadius: '50%', flexShrink: 0 },
+  donut: { width: 150, height: 150, borderRadius: '50%', flexShrink: 0 },
+  donutInner: { width: 78, height: 78, borderRadius: '50%', background: '#fff' },
+  donutCenter: { position: 'absolute' as any, inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' as any },
   legend: { minWidth: 160, maxWidth: 280 },
   legendRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 },
   legendDot: { width: 10, height: 10, borderRadius: '50%', flexShrink: 0 },
@@ -80,6 +83,9 @@ const FIELD_LABEL_MAP: Record<string, string> = {
 const LABEL_HYDRATION_DIMENSIONS = new Set(['issue_type', 'status', 'assignee', 'priority', 'project_uuid'])
 const LABEL_HYDRATION_LOOKUP_LIMIT = 50
 const dimensionLabelCache = new Map<string, Map<string, string>>()
+const ISSUE_TYPE_CACHE_TTL_MS = 5 * 60 * 1000
+const issueTypeCountsCache = new Map<string, { expiresAt: number; data: any }>()
+let issueTypesCache: { expiresAt: number; data: any[] } | null = null
 
 const DEFAULT_WORKITEM_HIERARCHY = {
   lock_query: '',
@@ -164,6 +170,10 @@ function buildWhereClause(filters: any[] = []): string {
   return parts.length > 0 ? ` where ${parts.join(' AND ')}` : ''
 }
 
+function appendWhereCondition(whereClause: string, condition: string): string {
+  return whereClause ? `${whereClause} AND ${condition}` : ` where ${condition}`
+}
+
 function parseWorkitemsOnesqlRows(json: any): any[] {
   const rows = json?.data?.data || json?.data || []
   return Array.isArray(rows) ? rows : []
@@ -189,6 +199,45 @@ async function executeBrowserWorkitemsOnesql(queryText: string): Promise<any[]> 
   return parseWorkitemsOnesqlRows(json)
 }
 
+async function executeBrowserGraphQL(queryText: string): Promise<any> {
+  const teamUUID = getTeamUUID()
+  if (!teamUUID) throw new Error('未获取到团队 UUID，无法获取工作项类型字典')
+  const res = await fetch(`/project/api/project/team/${teamUUID}/items/graphql?t=issueTypes`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+    body: JSON.stringify({ query: queryText, variables: {} }),
+  })
+  const text = await res.text()
+  let json: any = null
+  try {
+    json = text ? JSON.parse(text) : null
+  } catch {
+    throw new Error(`工作项类型字典返回非 JSON: ${text.substring(0, 300)}`)
+  }
+  if (!res.ok) throw new Error(`工作项类型字典 HTTP ${res.status}: ${text.substring(0, 500)}`)
+  return json
+}
+
+async function fetchIssueTypes(): Promise<any[]> {
+  const now = Date.now()
+  if (issueTypesCache && issueTypesCache.expiresAt > now) return issueTypesCache.data
+
+  const json = await executeBrowserGraphQL(
+    '{ issueTypes(orderBy: { namePinyin: ASC }) { uuid name } }',
+  )
+  const issueTypes = json?.data?.issueTypes || json?.body?.data?.issueTypes || []
+  if (!Array.isArray(issueTypes)) throw new Error('工作项类型字典格式异常')
+  const normalized = issueTypes
+    .filter((item: any) => item?.uuid)
+    .map((item: any) => ({
+      uuid: String(item.uuid),
+      name: String(item.name || item.uuid),
+    }))
+  issueTypesCache = { expiresAt: now + ISSUE_TYPE_CACHE_TTL_MS, data: normalized }
+  return normalized
+}
+
 function normalizeWorkitemItem(item: any): any {
   return {
     uuid: item.uuid || '',
@@ -211,6 +260,13 @@ function readAggregateValue(row: any, key: string): any {
 function getDimensionOutputKey(query: any, fallback: string): string {
   const dim = query.dimensions?.[0]
   return dim?.name || dim?.field_key || fallback
+}
+
+function getDisplayLimit(query: any, chartType: string, fallback: number): number {
+  const raw = Number(query.limit)
+  const value = Number.isFinite(raw) && raw > 0 ? raw : fallback
+  if (chartType === 'table') return Math.min(Math.max(value, 1), 1000)
+  return Math.min(Math.max(value, 1), 50)
 }
 
 function findDisplayName(value: any): string {
@@ -306,10 +362,65 @@ async function hydrateAggregateLabels(
   }))
 }
 
+async function countIssues(whereClause: string, metricName: string): Promise<number> {
+  const queryText = `select count() as total_count from issue${whereClause} limit 10000000000`
+  const rows = await executeBrowserWorkitemsOnesql(queryText)
+  const aggregate = rows.find((r: any) => r.type === 'aggregate' || r.type === 'aggregation')?.aggregate
+    || rows.find((r: any) => r.type === 'aggregation')?.aggregation
+    || rows[0]?.aggregate
+    || rows[0]?.aggregation
+    || {}
+  return Number(aggregate.total_count ?? aggregate[metricName] ?? aggregate.count ?? 0)
+}
+
+async function queryIssueTypeCounts(whereClause: string, metricName: string, outKey: string, startedAt: number): Promise<any> {
+  const cacheKey = JSON.stringify({ whereClause, metricName, outKey })
+  const cached = issueTypeCountsCache.get(cacheKey)
+  const now = Date.now()
+  if (cached && cached.expiresAt > now) return cached.data
+
+  const issueTypes = await fetchIssueTypes()
+  const total = await countIssues(whereClause, metricName)
+  const typedCounts = await mapWithConcurrency(issueTypes, 8, async (issueType: any) => {
+    const typeWhereClause = appendWhereCondition(whereClause, `field007 = '${escapeOnesqlValue(issueType.uuid)}'`)
+    return {
+      name: issueType.name,
+      count: await countIssues(typeWhereClause, metricName),
+    }
+  })
+
+  const mergedByName = new Map<string, number>()
+  for (const row of typedCounts) {
+    const count = Number(row.count) || 0
+    if (count <= 0) continue
+    mergedByName.set(row.name, (mergedByName.get(row.name) || 0) + count)
+  }
+
+  const rows = Array.from(mergedByName.entries())
+    .map(([name, count]) => ({ [outKey]: name, [metricName]: count }))
+    .sort((a: any, b: any) => Number(b[metricName]) - Number(a[metricName]))
+
+  const knownTotal = rows.reduce((sum: number, row: any) => sum + (Number(row[metricName]) || 0), 0)
+  const unknownTotal = Math.max(total - knownTotal, 0)
+  if (unknownTotal > 0) {
+    rows.push({ [outKey]: '其他/未识别类型', [metricName]: unknownTotal })
+  }
+
+  const data = {
+    rows,
+    total,
+    query_time_ms: Date.now() - startedAt,
+    debug: { provider: 'workitems_onesql', query: 'issue_type_exact_counts' },
+  }
+  issueTypeCountsCache.set(cacheKey, { expiresAt: now + ISSUE_TYPE_CACHE_TTL_MS, data })
+  return data
+}
+
 async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promise<any> {
   const startedAt = Date.now()
   const metricName = query.metrics?.[0]?.name || 'count'
-  const limit = Math.min(Math.max(query.limit || 100, 1), 1000)
+  const detailLimit = Math.min(Math.max(query.limit || 100, 1), 1000)
+  const aggregateLimit = 1000
   const whereClause = buildWhereClause(query.filters || [])
 
   if (chartType === 'number' || !query.dimensions?.length) {
@@ -330,7 +441,7 @@ async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promi
   }
 
   if (chartType === 'table') {
-    const queryText = `select uid(uuid, uuid as path, field001, field007.name, field005.name, field006.uuid, field009) from issue${whereClause} limit 0, ${limit}`
+    const queryText = `select uid(uuid, uuid as path, field001, field007.name, field005.name, field006.uuid, field009) from issue${whereClause} limit 0, ${detailLimit}`
     const rows = await executeBrowserWorkitemsOnesql(queryText)
     const items = rows.filter((r: any) => r.type === 'item').map((r: any) => normalizeWorkitemItem(r.item || {}))
     return {
@@ -345,7 +456,11 @@ async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promi
   const dimKey = dim.field_key || dim.name
   const dimField = getOnesqlField(dimKey)
   const outKey = dim.name || dimKey
-  const queryText = `select ${dimField} as ${outKey}, count() as total_count from issue${whereClause} group by ${dimField} limit 0, ${limit}`
+  if (dimKey === 'issue_type') {
+    return queryIssueTypeCounts(whereClause, metricName, outKey, startedAt)
+  }
+
+  const queryText = `select ${dimField} as ${outKey}, count() as total_count from issue${whereClause} group by ${dimField} limit 0, ${aggregateLimit}`
   const rows = await executeBrowserWorkitemsOnesql(queryText)
   const rawAggregates = rows
     .flatMap((r: any) => {
@@ -466,10 +581,11 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
     if (chartType === 'bar') {
       const dimKey = getDimensionOutputKey(query, Object.keys(rows[0])[0])
       const metricKey = query.metrics?.[0]?.name || 'count'
-      const maxVal = Math.max(...rows.map((r: any) => Number(r[metricKey]) || 0), 1)
+      const visibleRows = rows.slice(0, getDisplayLimit(query, chartType, 15))
+      const maxVal = Math.max(...visibleRows.map((r: any) => Number(r[metricKey]) || 0), 1)
       return (
         <div>
-          {rows.slice(0, 15).map((r: any, i: number) => (
+          {visibleRows.map((r: any, i: number) => (
             <div key={i} style={S.barRow}>
               <div style={S.barLabel} title={String(r[dimKey] || '-')}>{String(r[dimKey] || '-')}</div>
               <div style={S.barTrack}>
@@ -482,26 +598,41 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
       )
     }
 
-    if (chartType === 'pie') {
+    if (chartType === 'pie' || chartType === 'donut') {
       const dimKey = getDimensionOutputKey(query, Object.keys(rows[0])[0])
       const metricKey = query.metrics?.[0]?.name || 'count'
-      const visibleRows = rows.slice(0, 8)
-      const total = visibleRows.reduce((sum: number, r: any) => sum + (Number(r[metricKey]) || 0), 0)
+      const visibleRows = rows.slice(0, getDisplayLimit(query, chartType, 8))
+      const total = rows.reduce((sum: number, r: any) => sum + (Number(r[metricKey]) || 0), 0)
+      const visibleTotal = visibleRows.reduce((sum: number, r: any) => sum + (Number(r[metricKey]) || 0), 0)
+      const otherTotal = Math.max(total - visibleTotal, 0)
       if (total <= 0) return <div style={S.empty}>暂无数据</div>
 
       let cursor = 0
-      const gradient = visibleRows
+      const gradientParts = visibleRows
         .map((r: any, i: number) => {
           const value = Number(r[metricKey]) || 0
           const start = cursor
           cursor += (value / total) * 100
           return `${CHART_COLORS[i % CHART_COLORS.length]} ${start}% ${cursor}%`
         })
-        .join(', ')
+      if (otherTotal > 0 && cursor < 100) gradientParts.push(`#f0f0f0 ${cursor}% 100%`)
+      const gradient = gradientParts.join(', ')
 
       return (
         <div style={S.pieWrap}>
-          <div style={{ ...S.pie, background: `conic-gradient(${gradient})` }} />
+          <div
+            style={{
+              ...(chartType === 'donut' ? S.donut : S.pie),
+              background: `conic-gradient(${gradient})`,
+              position: 'relative',
+            }}
+          >
+            {chartType === 'donut' && (
+              <div style={S.donutCenter}>
+                <div style={S.donutInner} />
+              </div>
+            )}
+          </div>
           <div style={S.legend}>
             {visibleRows.map((r: any, i: number) => {
               const value = Number(r[metricKey]) || 0
@@ -514,6 +645,13 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
                 </div>
               )
             })}
+            {otherTotal > 0 && (
+              <div style={S.legendRow}>
+                <span style={{ ...S.legendDot, background: '#f0f0f0' }} />
+                <span style={S.legendLabel}>其他</span>
+                <span style={S.legendValue}>{otherTotal} ({Math.round((otherTotal / total) * 100)}%)</span>
+              </div>
+            )}
           </div>
         </div>
       )
@@ -521,12 +659,13 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
 
     if (chartType === 'table') {
       const cols = rows.length > 0 ? Object.keys(rows[0]) : []
+      const visibleRows = rows.slice(0, getDisplayLimit(query, chartType, 50))
       return (
         <div style={{ overflowX: 'auto' }}>
           <table style={S.table}>
             <thead><tr>{cols.map((c) => <th key={c} style={S.th}>{FIELD_LABEL_MAP[c] || c}</th>)}</tr></thead>
             <tbody>
-              {rows.slice(0, 50).map((r: any, i: number) => (
+              {visibleRows.map((r: any, i: number) => (
                 <tr key={i}>{cols.map((c) => <td key={c} style={S.td}>{String(r[c] ?? '-')}</td>)}</tr>
               ))}
             </tbody>

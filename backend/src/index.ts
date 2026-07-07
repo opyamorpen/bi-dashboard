@@ -200,7 +200,7 @@ export function UnInstall() {
 }
 
 export async function Enable() {
-  Logger.info('[BI] Enable — v0.4.17 hydrates readable dimension labels for full workitems ONESQL')
+  Logger.info('[BI] Enable — v0.4.18 adds donut chart, configurable Top N display, and exact issue type counts')
 }
 
 export function Upgrade(oldVersion: any) {

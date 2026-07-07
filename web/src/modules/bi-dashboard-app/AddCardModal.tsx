@@ -40,6 +40,7 @@ const S: any = {
     width: '100%',
     boxSizing: 'border-box' as any,
   },
+  helpText: { marginTop: 4, color: '#999', fontSize: 12 },
   btn: (p: boolean) => ({
     padding: '8px 20px',
     borderRadius: 4,
@@ -58,10 +59,19 @@ const CHART_TYPES = [
   { value: 'number', label: '数字指标卡' },
   { value: 'bar', label: '柱状图' },
   { value: 'pie', label: '饼图' },
+  { value: 'donut', label: '环形图' },
   { value: 'table', label: '表格' },
 ]
 
-const DIMENSION_CHART_TYPES = new Set(['bar', 'pie'])
+const DIMENSION_CHART_TYPES = new Set(['bar', 'pie', 'donut'])
+const LIMIT_CHART_TYPES = new Set(['bar', 'pie', 'donut', 'table'])
+
+function getDefaultLimit(chartType: string): number {
+  if (chartType === 'bar') return 15
+  if (chartType === 'pie' || chartType === 'donut') return 8
+  if (chartType === 'table') return 50
+  return 100
+}
 
 function pickDefaultDimension(fields: any[]): string {
   const preferred = ['status', 'issue_type', 'assignee', 'project_uuid']
@@ -85,6 +95,7 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
   const [fields, setFields] = useState<any[]>([])
   const [selectedDim, setSelectedDim] = useState('')
   const [metricAgg, setMetricAgg] = useState('count')
+  const [topN, setTopN] = useState(getDefaultLimit('number'))
   const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
@@ -119,6 +130,10 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
     if (defaultDim) setSelectedDim(defaultDim)
   }, [chartType, fields, selectedDim])
 
+  useEffect(() => {
+    setTopN(getDefaultLimit(chartType))
+  }, [chartType])
+
   const dimFields = fields.filter((f: any) => f.dimension)
   const metricFields = fields.filter((f: any) => f.metric)
 
@@ -139,7 +154,7 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
             : [{ field_key: selectedDim, name: selectedDim }],
         filters: [],
         sort: [],
-        limit: 100,
+        limit: Math.min(Math.max(Number(topN) || getDefaultLimit(chartType), 1), 1000),
       },
       style: {},
       layout: { x: 0, y: 0, w: 6, h: 4 },
@@ -205,6 +220,20 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
             <option value="avg">平均</option>
           </select>
         </div>
+        {LIMIT_CHART_TYPES.has(chartType) && (
+          <div style={S.section}>
+            <label style={S.label}>展示数量</label>
+            <input
+              style={S.input}
+              type="number"
+              min={1}
+              max={1000}
+              value={topN}
+              onChange={(e) => setTopN(Math.min(Math.max(Number(e.target.value) || 1, 1), 1000))}
+            />
+            <div style={S.helpText}>用于控制 Top N 分组或表格明细条数。</div>
+          </div>
+        )}
         <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button style={S.btn(false)} onClick={onCancel}>
             取消

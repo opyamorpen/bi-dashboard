@@ -2,7 +2,7 @@ service:
   app_id: 8SHK4cQv
   name: BI仪表盘
   description: 团队级BI数据分析插件。支持自定义仪表盘、数据集、图表卡片、下钻明细和权限控制。
-  version: 0.4.17
+  version: 0.4.18
   mode: org
   logo: null
   language: nodejs
