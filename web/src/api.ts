@@ -64,7 +64,7 @@ function getApiAppID(): string {
       if (m) return m[3]
     }
   }
-  return 'bi_dash001'
+  return 'j4BsRG9J'
 }
 
 export class BiApiError extends Error {

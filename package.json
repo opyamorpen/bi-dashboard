@@ -43,13 +43,25 @@
     "@ones/cli-plugin": "1.70.34"
   },
   "dependencies": {
+    "@ones-op/bridge": "^1.0.0",
+    "@ones-op/event": "^1.0.0",
+    "@ones-op/node-ability": "^1.0.0",
+    "@ones-op/node-error": "^1.0.0",
     "@ones-op/node-logger": "^1.0.0",
     "@ones-op/node-types": "^1.0.0",
     "@ones-op/fetch": "1.70.34",
     "@ones-op/sdk": "1.70.34",
     "@ones-op/store": "1.70.34",
+    "@ones-op/utils": "^1.0.0",
     "react": "~17.0.2",
     "react-dom": "~17.0.2"
+  },
+  "overrides": {
+    "rollup-plugin-typescript2": {
+      "@rollup/pluginutils": {
+        "picomatch": "2.3.1"
+      }
+    }
   },
   "workspaces": [
     "web",

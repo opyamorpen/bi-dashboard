@@ -1,5 +1,5 @@
 service:
-  app_id: bi_dash001
+  app_id: j4BsRG9J
   name: BI仪表盘
   description: 团队级BI数据分析插件。支持自定义仪表盘、数据集、图表卡片、下钻明细和权限控制。
   version: 0.1.0
@@ -27,8 +27,13 @@ modules:
   - id: bi-dashboard-app
     moduleType: ones:app:new
     title: BI仪表盘
-    description: BI数据分析仪表盘：创建仪表盘、配置图表卡片、数据分析
-    entry: modules/bi-dashboard-app/index.html
+    modules:
+      - id: bi-dashboard-list
+        title: 仪表盘
+        entry: modules/bi-dashboard-app/index.html
+      - id: bi-dashboard-detail
+        title: 仪表盘详情
+        entry: modules/bi-dashboard-app/index.html
 abilities:
   - id: bi-sidebar-menu
     name: 侧边栏菜单
@@ -40,87 +45,87 @@ apis:
   - type: external
     methods:
       - GET
-    url: /team/:team_uuid/bi/dashboards
+    url: /team/:teamUUID/bi/dashboards
     function: listDashboards
   - type: external
     methods:
       - GET
-    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid
+    url: /team/:teamUUID/bi/dashboard/:dashboardUUID
     function: getDashboard
   - type: external
     methods:
       - POST
-    url: /team/:team_uuid/bi/dashboard
+    url: /team/:teamUUID/bi/dashboard
     function: createDashboard
   - type: external
     methods:
       - POST
-    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid
+    url: /team/:teamUUID/bi/dashboard/:dashboardUUID
     function: updateDashboard
   - type: external
     methods:
       - DELETE
-    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid
+    url: /team/:teamUUID/bi/dashboard/:dashboardUUID
     function: deleteDashboard
   - type: external
     methods:
       - POST
-    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid/card
+    url: /team/:teamUUID/bi/dashboard/:dashboardUUID/card
     function: createCard
   - type: external
     methods:
       - POST
-    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid/card/:card_uuid
+    url: /team/:teamUUID/bi/dashboard/:dashboardUUID/card/:cardUUID
     function: updateCard
   - type: external
     methods:
       - DELETE
-    url: /team/:team_uuid/bi/dashboard/:dashboard_uuid/card/:card_uuid
+    url: /team/:teamUUID/bi/dashboard/:dashboardUUID/card/:cardUUID
     function: deleteCard
   - type: external
     methods:
       - GET
-    url: /team/:team_uuid/bi/datasets
+    url: /team/:teamUUID/bi/datasets
     function: listDatasets
   - type: external
     methods:
       - POST
-    url: /team/:team_uuid/bi/dataset
+    url: /team/:teamUUID/bi/dataset
     function: createDataset
   - type: external
     methods:
       - GET
-    url: /team/:team_uuid/bi/dataset/:dataset_uuid
+    url: /team/:teamUUID/bi/dataset/:datasetUUID
     function: getDataset
   - type: external
     methods:
       - POST
-    url: /team/:team_uuid/bi/dataset/:dataset_uuid
+    url: /team/:teamUUID/bi/dataset/:datasetUUID
     function: updateDataset
   - type: external
     methods:
       - DELETE
-    url: /team/:team_uuid/bi/dataset/:dataset_uuid
+    url: /team/:teamUUID/bi/dataset/:datasetUUID
     function: deleteDataset
   - type: external
     methods:
       - POST
-    url: /team/:team_uuid/bi/query
+    url: /team/:teamUUID/bi/query
     function: biQuery
   - type: external
     methods:
       - POST
-    url: /team/:team_uuid/bi/detail
+    url: /team/:teamUUID/bi/detail
     function: biDetail
   - type: external
     methods:
       - GET
-    url: /team/:team_uuid/bi/metadata
+    url: /team/:teamUUID/bi/metadata
     function: getMetadata
   - type: external
     methods:
       - GET
-    url: /team/:team_uuid/bi/users/me
+    url: /team/:teamUUID/bi/users/me
     function: getCurrentUser
 storage:
   entities:

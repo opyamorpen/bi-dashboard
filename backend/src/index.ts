@@ -71,19 +71,19 @@ function getParam(req: any, name: string): string {
   const url = rawUrl.split('?')[0]
   const named = url.match(new RegExp(`/${name}/([^/]+)`))
   if (named) return named[1]
-  if (name === 'team_uuid') {
+  if (name === 'teamUUID') {
     const tm = url.match(/\/team\/([^/]+)/)
     if (tm) return tm[1]
   }
-  if (name === 'dashboard_uuid') {
+  if (name === 'dashboardUUID') {
     const dm = url.match(/\/dashboard\/([^/]+)/)
     if (dm) return dm[1]
   }
-  if (name === 'dataset_uuid') {
+  if (name === 'datasetUUID') {
     const dm = url.match(/\/dataset\/([^/]+)/)
     if (dm) return dm[1]
   }
-  if (name === 'card_uuid') {
+  if (name === 'cardUUID') {
     const cm = url.match(/\/card\/([^/]+)/)
     if (cm) return cm[1]
   }
@@ -109,35 +109,6 @@ export function UnInstall() { Logger.info('[BI] UnInstall') }
 
 export async function Enable() {
   Logger.info('[BI] Enable — v0.1.0')
-  // 初始化默认数据集
-  const existing = await qAll(datasetEntity)
-  if (existing.length === 0) {
-    const defaultDatasetUuid = 'default_issue_dataset'
-    await datasetEntity.set(defaultDatasetUuid, cleanForSet({
-      dataset_uuid: defaultDatasetUuid,
-      team_uuid: '',
-      name: '工作项数据集',
-      source_type: 'issue',
-      owner_uuid: '',
-      field_config_json: JSON.stringify([
-        { key: 'title', label: '标题', type: 'text', dimension: false, metric: false },
-        { key: 'issue_type', label: '工作项类型', type: 'text', dimension: true, metric: false },
-        { key: 'status', label: '状态', type: 'text', dimension: true, metric: false },
-        { key: 'assignee', label: '负责人', type: 'user', dimension: true, metric: false },
-        { key: 'project', label: '所属项目', type: 'text', dimension: true, metric: false },
-        { key: 'sprint', label: '所属迭代', type: 'text', dimension: true, metric: false },
-        { key: 'priority', label: '优先级', type: 'text', dimension: true, metric: false },
-        { key: 'created_at', label: '创建时间', type: 'date', dimension: true, metric: false },
-        { key: 'issue_count', label: '工作项计数', type: 'number', dimension: false, metric: true, aggregation: 'count' },
-      ]),
-      base_filter_json: '{}',
-      description: '基于ONES工作项的默认数据集，支持按类型、状态、负责人、项目、迭代等维度分析',
-      created_by: 'system',
-      created_at: Date.now(),
-      updated_at: Date.now(),
-    }))
-    Logger.info('[BI] Default dataset created')
-  }
 }
 
 export function Upgrade(oldVersion: any) {
@@ -149,7 +120,7 @@ export function Upgrade(oldVersion: any) {
 // ============================================================
 
 export async function listDashboards(req: any): Promise<PluginResponse> {
-  const teamUUID = getParam(req, 'team_uuid')
+  const teamUUID = getParam(req, 'teamUUID')
   const operator = getOperator(req)
   const all = await qAll(dashboardEntity, (v: any) => v.team_uuid === teamUUID)
   const visible = all.filter((d: any) => d.status !== 'deleted' && (d.owner_uuid === operator || d.status === 'active'))
@@ -166,7 +137,7 @@ export async function listDashboards(req: any): Promise<PluginResponse> {
 }
 
 export async function getDashboard(req: any): Promise<PluginResponse> {
-  const dashboardUuid = getParam(req, 'dashboard_uuid')
+  const dashboardUuid = getParam(req, 'dashboardUUID')
   if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
   const d = await dashboardEntity.get(dashboardUuid) as any
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
@@ -183,7 +154,7 @@ export async function getDashboard(req: any): Promise<PluginResponse> {
 }
 
 export async function createDashboard(req: any): Promise<PluginResponse> {
-  const teamUUID = getParam(req, 'team_uuid')
+  const teamUUID = getParam(req, 'teamUUID')
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   if (!b.name) return { body: { error: '缺少仪表盘名称' }, statusCode: 400 }
@@ -206,7 +177,7 @@ export async function createDashboard(req: any): Promise<PluginResponse> {
 }
 
 export async function updateDashboard(req: any): Promise<PluginResponse> {
-  const dashboardUuid = getParam(req, 'dashboard_uuid')
+  const dashboardUuid = getParam(req, 'dashboardUUID')
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
@@ -223,7 +194,7 @@ export async function updateDashboard(req: any): Promise<PluginResponse> {
 }
 
 export async function deleteDashboard(req: any): Promise<PluginResponse> {
-  const dashboardUuid = getParam(req, 'dashboard_uuid')
+  const dashboardUuid = getParam(req, 'dashboardUUID')
   const operator = getOperator(req)
   if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
   const d = await dashboardEntity.get(dashboardUuid) as any
@@ -239,7 +210,7 @@ export async function deleteDashboard(req: any): Promise<PluginResponse> {
 // ============================================================
 
 export async function createCard(req: any): Promise<PluginResponse> {
-  const dashboardUuid = getParam(req, 'dashboard_uuid')
+  const dashboardUuid = getParam(req, 'dashboardUUID')
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
@@ -263,8 +234,8 @@ export async function createCard(req: any): Promise<PluginResponse> {
 }
 
 export async function updateCard(req: any): Promise<PluginResponse> {
-  const dashboardUuid = getParam(req, 'dashboard_uuid')
-  const cardUuid = getParam(req, 'card_uuid')
+  const dashboardUuid = getParam(req, 'dashboardUUID')
+  const cardUuid = getParam(req, 'cardUUID')
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   const d = await dashboardEntity.get(dashboardUuid) as any
@@ -283,8 +254,8 @@ export async function updateCard(req: any): Promise<PluginResponse> {
 }
 
 export async function deleteCard(req: any): Promise<PluginResponse> {
-  const dashboardUuid = getParam(req, 'dashboard_uuid')
-  const cardUuid = getParam(req, 'card_uuid')
+  const dashboardUuid = getParam(req, 'dashboardUUID')
+  const cardUuid = getParam(req, 'cardUUID')
   const operator = getOperator(req)
   const d = await dashboardEntity.get(dashboardUuid) as any
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
@@ -299,7 +270,7 @@ export async function deleteCard(req: any): Promise<PluginResponse> {
 // ============================================================
 
 export async function listDatasets(req: any): Promise<PluginResponse> {
-  const teamUUID = getParam(req, 'team_uuid')
+  const teamUUID = getParam(req, 'teamUUID')
   const all = await qAll(datasetEntity, (v: any) => v.team_uuid === teamUUID || v.dataset_uuid === 'default_issue_dataset')
   return { body: { data: all.map((d: any) => ({
     dataset_uuid: d.dataset_uuid,
@@ -312,7 +283,7 @@ export async function listDatasets(req: any): Promise<PluginResponse> {
 }
 
 export async function getDataset(req: any): Promise<PluginResponse> {
-  const datasetUuid = getParam(req, 'dataset_uuid')
+  const datasetUuid = getParam(req, 'datasetUUID')
   const d = await datasetEntity.get(datasetUuid) as any
   if (!d) return { body: { error: '数据集不存在' }, statusCode: 404 }
   return { body: { data: {
@@ -326,7 +297,7 @@ export async function getDataset(req: any): Promise<PluginResponse> {
 }
 
 export async function createDataset(req: any): Promise<PluginResponse> {
-  const teamUUID = getParam(req, 'team_uuid')
+  const teamUUID = getParam(req, 'teamUUID')
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   if (!b.name) return { body: { error: '缺少数据集名称' }, statusCode: 400 }
@@ -344,7 +315,7 @@ export async function createDataset(req: any): Promise<PluginResponse> {
 }
 
 export async function updateDataset(req: any): Promise<PluginResponse> {
-  const datasetUuid = getParam(req, 'dataset_uuid')
+  const datasetUuid = getParam(req, 'datasetUUID')
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   const d = await datasetEntity.get(datasetUuid) as any
@@ -359,7 +330,7 @@ export async function updateDataset(req: any): Promise<PluginResponse> {
 }
 
 export async function deleteDataset(req: any): Promise<PluginResponse> {
-  const datasetUuid = getParam(req, 'dataset_uuid')
+  const datasetUuid = getParam(req, 'datasetUUID')
   if (datasetUuid === 'default_issue_dataset') return { body: { error: '默认数据集不可删除' }, statusCode: 403 }
   await datasetEntity.delete(datasetUuid)
   return { body: { data: { ok: true } } }
@@ -370,7 +341,7 @@ export async function deleteDataset(req: any): Promise<PluginResponse> {
 // ============================================================
 
 export async function biQuery(req: any): Promise<PluginResponse> {
-  const teamUUID = getParam(req, 'team_uuid')
+  const teamUUID = getParam(req, 'teamUUID')
   const b = (req.body || {}) as any
   const { dataset_uuid, chart_type, metrics, dimensions, filters, sort, limit } = b
   if (!dataset_uuid) return { body: { error: '缺少 dataset_uuid' }, statusCode: 400 }
@@ -471,7 +442,7 @@ async function executeOnesqlQuery(teamUUID: string, params: any): Promise<{ rows
 // ============================================================
 
 export async function biDetail(req: any): Promise<PluginResponse> {
-  const teamUUID = getParam(req, 'team_uuid')
+  const teamUUID = getParam(req, 'teamUUID')
   const b = (req.body || {}) as any
   const { dataset_uuid, filters, page, page_size } = b
   if (!dataset_uuid) return { body: { error: '缺少 dataset_uuid' }, statusCode: 400 }
@@ -513,7 +484,7 @@ export async function biDetail(req: any): Promise<PluginResponse> {
 // ============================================================
 
 export async function getMetadata(req: any): Promise<PluginResponse> {
-  const teamUUID = getParam(req, 'team_uuid')
+  const teamUUID = getParam(req, 'teamUUID')
   // 返回可用字段定义
   return { body: { data: {
     fields: [
