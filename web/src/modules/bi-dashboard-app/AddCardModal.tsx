@@ -74,6 +74,7 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
   const [fields, setFields] = useState<any[]>([])
   const [selectedDim, setSelectedDim] = useState('')
   const [metricAgg, setMetricAgg] = useState('count')
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     if (datasets.length === 0) {
@@ -83,7 +84,7 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
           setDatasets(list)
           if (list.length > 0) setDatasetUuid(list[0].dataset_uuid)
         })
-        .catch(() => {})
+        .catch((e: any) => setLoadError(e.message || '加载数据集失败'))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -97,20 +98,25 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
         const firstDim = f.find((x: any) => x.dimension)
         if (firstDim) setSelectedDim(firstDim.key)
       })
-      .catch(() => {})
+      .catch((e: any) => setLoadError(e.message || '加载数据集字段失败'))
   }, [datasetUuid])
 
   const dimFields = fields.filter((f: any) => f.dimension)
   const metricFields = fields.filter((f: any) => f.metric)
 
   function handleAdd() {
+    if (!datasetUuid) {
+      setLoadError('请先选择数据集')
+      return
+    }
     onAdd({
       title: title.trim() || '未命名卡片',
       chart_type: chartType,
       dataset_uuid: datasetUuid,
       query: {
         metrics: [{ name: 'count', aggregation: metricAgg, field_key: '*' }],
-        dimensions: selectedDim ? [{ field_key: selectedDim, name: selectedDim }] : [],
+        dimensions:
+          chartType === 'number' || !selectedDim ? [] : [{ field_key: selectedDim, name: selectedDim }],
         filters: [],
         sort: [],
         limit: 100,
@@ -145,6 +151,7 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
             value={datasetUuid}
             onChange={(e) => setDatasetUuid(e.target.value)}
           >
+            {datasets.length === 0 && <option value="">暂无可用数据集</option>}
             {datasets.map((d: any) => (
               <option key={d.dataset_uuid} value={d.dataset_uuid}>
                 {d.name}
@@ -152,6 +159,7 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
             ))}
           </select>
         </div>
+        {loadError && <div style={{ color: '#ff4d4f', fontSize: 13, marginBottom: 12 }}>{loadError}</div>}
         {chartType !== 'number' && (
           <div style={S.section}>
             <label style={S.label}>分组维度</label>
@@ -181,7 +189,7 @@ export const AddCardModal: React.FC<Props> = ({ datasets: propDatasets, onAdd, o
           <button style={S.btn(false)} onClick={onCancel}>
             取消
           </button>
-          <button style={S.btn(true)} onClick={handleAdd}>
+          <button style={S.btn(true)} onClick={handleAdd} disabled={!datasetUuid}>
             添加
           </button>
         </div>

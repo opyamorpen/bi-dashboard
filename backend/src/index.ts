@@ -1,7 +1,7 @@
 import { Logger } from '@ones-op/node-logger'
 import { storage } from '@ones-op/sdk/node'
 import type { PluginResponse } from '@ones-op/node-types'
-import { FetchAsAdmin } from '@ones-op/fetch'
+import { FetchAsAdmin, OPFetch } from '@ones-op/fetch'
 
 // ============================================================
 // 实体引用
@@ -9,6 +9,74 @@ import { FetchAsAdmin } from '@ones-op/fetch'
 const dashboardEntity = storage.entity('bi_dashboard')
 const datasetEntity = storage.entity('bi_dataset')
 const auditLog = storage.entity('bi_audit_log')
+
+const DEFAULT_DATASET_UUID = 'default_issue_dataset'
+const DEFAULT_ISSUE_FIELDS = [
+  { key: 'uuid', label: '工作项UUID', type: 'text', dimension: false, metric: false },
+  { key: 'title', label: '标题', type: 'text', dimension: true, metric: false },
+  { key: 'issue_type', label: '工作项类型', type: 'text', dimension: true, metric: false },
+  { key: 'status', label: '状态', type: 'text', dimension: true, metric: false },
+  { key: 'assignee', label: '负责人', type: 'text', dimension: true, metric: false },
+  { key: 'priority', label: '优先级', type: 'text', dimension: true, metric: false },
+  { key: 'project_uuid', label: '项目', type: 'text', dimension: true, metric: false },
+  { key: 'created_at', label: '创建时间', type: 'datetime', dimension: true, metric: false },
+]
+
+const FIELD_ALIASES: Record<string, string[]> = {
+  uuid: ['uuid', 'key'],
+  title: ['title', 'name', 'summary'],
+  issue_type: ['issue_type', 'issue_type_name', 'issueType', 'type', 'type_name'],
+  status: ['status', 'status_name', 'statusName', 'state'],
+  assignee: ['assignee', 'assignee_name', 'assigneeName', 'assign', 'owner', 'owner_name'],
+  priority: ['priority', 'priority_name', 'priorityName'],
+  project_uuid: ['project_uuid', 'projectUUID', 'project', 'project_name', 'projectName'],
+  created_at: ['created_at', 'create_time', 'createdTime', 'server_create_stamp'],
+}
+
+function getDefaultIssueDataset(teamUUID: string) {
+  return {
+    dataset_uuid: DEFAULT_DATASET_UUID,
+    team_uuid: teamUUID,
+    name: '默认工作项数据集',
+    source_type: 'issue',
+    owner_uuid: '',
+    field_config_json: JSON.stringify(DEFAULT_ISSUE_FIELDS),
+    base_filter_json: '{}',
+    description: '系统默认工作项数据集，可用于工作项数量、状态、负责人等基础分析。',
+    created_by: '',
+    created_at: 0,
+    updated_at: 0,
+  }
+}
+
+async function getDatasetOrDefault(datasetUuid: string, teamUUID: string) {
+  if (datasetUuid === DEFAULT_DATASET_UUID) return getDefaultIssueDataset(teamUUID)
+  return (await datasetEntity.get(datasetUuid)) as any
+}
+
+function readField(row: any, key: string): any {
+  if (!row) return ''
+  const aliases = FIELD_ALIASES[key] || [key]
+  for (const alias of aliases) {
+    const value = row[alias]
+    if (value !== undefined && value !== null && value !== '') {
+      if (typeof value === 'object') return value.name || value.title || value.uuid || value.value || ''
+      return value
+    }
+  }
+  const nested = row[key]
+  if (nested && typeof nested === 'object') return nested.name || nested.uuid || nested.value || ''
+  return ''
+}
+
+function normalizeIssueRow(raw: any): any {
+  const src = raw?.item || raw?.task || raw?.issue || raw || {}
+  const row: any = {}
+  for (const field of DEFAULT_ISSUE_FIELDS) row[field.key] = readField(src, field.key)
+  row.uuid = row.uuid || src.uuid || src.key || ''
+  row.title = row.title || src.name || src.summary || row.uuid || '-'
+  return row
+}
 
 // ============================================================
 // 工具函数
@@ -255,8 +323,11 @@ export async function createCard(req: any): Promise<PluginResponse> {
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
+  if (!b.dataset_uuid) return { body: { error: '缺少 dataset_uuid' }, statusCode: 400 }
   const d = (await dashboardEntity.get(dashboardUuid)) as any
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
+  const ds = await getDatasetOrDefault(b.dataset_uuid, d.team_uuid)
+  if (!ds) return { body: { error: '数据集不存在' }, statusCode: 404 }
   const cards = JSON.parse(d.cards_json || '[]')
   const cardUuid = makeUuid()
   const newCard = {
@@ -323,11 +394,13 @@ export async function listDatasets(req: any): Promise<PluginResponse> {
   const teamUUID = getParam(req, 'teamUUID')
   const all = await qAll(
     datasetEntity,
-    (v: any) => v.team_uuid === teamUUID || v.dataset_uuid === 'default_issue_dataset',
+    (v: any) => v.team_uuid === teamUUID || v.dataset_uuid === DEFAULT_DATASET_UUID,
   )
+  const hasDefault = all.some((d: any) => d.dataset_uuid === DEFAULT_DATASET_UUID)
+  const rows = hasDefault ? all : [getDefaultIssueDataset(teamUUID), ...all]
   return {
     body: {
-      data: all.map((d: any) => ({
+      data: rows.map((d: any) => ({
         dataset_uuid: d.dataset_uuid,
         name: d.name,
         source_type: d.source_type,
@@ -340,8 +413,9 @@ export async function listDatasets(req: any): Promise<PluginResponse> {
 }
 
 export async function getDataset(req: any): Promise<PluginResponse> {
+  const teamUUID = getParam(req, 'teamUUID')
   const datasetUuid = getParam(req, 'datasetUUID')
-  const d = (await datasetEntity.get(datasetUuid)) as any
+  const d = await getDatasetOrDefault(datasetUuid, teamUUID)
   if (!d) return { body: { error: '数据集不存在' }, statusCode: 404 }
   return {
     body: {
@@ -365,18 +439,7 @@ export async function createDataset(req: any): Promise<PluginResponse> {
   const uuid = makeUuid()
   const now = Date.now()
 
-  // 默认工作项字段配置（当用户未指定 fields 时使用）
-  const defaultIssueFields = [
-    { key: 'uuid', label: '工作项UUID', type: 'text', dimension: false, metric: false },
-    { key: 'title', label: '标题', type: 'text', dimension: true, metric: false },
-    { key: 'issue_type', label: '工作项类型', type: 'text', dimension: true, metric: false },
-    { key: 'status', label: '状态', type: 'text', dimension: true, metric: false },
-    { key: 'assignee', label: '负责人', type: 'text', dimension: true, metric: false },
-    { key: 'priority', label: '优先级', type: 'text', dimension: true, metric: false },
-    { key: 'project_uuid', label: '项目', type: 'text', dimension: true, metric: false },
-    { key: 'created_at', label: '创建时间', type: 'datetime', dimension: true, metric: false },
-  ]
-  const fields = b.fields && b.fields.length > 0 ? b.fields : defaultIssueFields
+  const fields = b.fields && b.fields.length > 0 ? b.fields : DEFAULT_ISSUE_FIELDS
 
   await datasetEntity.set(
     uuid,
@@ -414,7 +477,7 @@ export async function updateDataset(req: any): Promise<PluginResponse> {
 
 export async function deleteDataset(req: any): Promise<PluginResponse> {
   const datasetUuid = getParam(req, 'datasetUUID')
-  if (datasetUuid === 'default_issue_dataset')
+  if (datasetUuid === DEFAULT_DATASET_UUID)
     return { body: { error: '默认数据集不可删除' }, statusCode: 403 }
   await datasetEntity.delete(datasetUuid)
   return { body: { data: { ok: true } } }
@@ -430,13 +493,14 @@ export async function biQuery(req: any): Promise<PluginResponse> {
   const { dataset_uuid, chart_type, metrics, dimensions, filters, sort, limit } = b
   if (!dataset_uuid) return { body: { error: '缺少 dataset_uuid' }, statusCode: 400 }
 
-  const ds = (await datasetEntity.get(dataset_uuid)) as any
+  const ds = await getDatasetOrDefault(dataset_uuid, teamUUID)
   if (!ds) return { body: { error: '数据集不存在' }, statusCode: 404 }
 
   try {
     // 构建 ONESQL 查询
     const queryResult = await executeOnesqlQuery(teamUUID, {
       source_type: ds.source_type || 'issue',
+      chart_type,
       metrics: metrics || [],
       dimensions: dimensions || [],
       filters: filters || [],
@@ -493,6 +557,8 @@ async function executeOnesql(
   const debug = {
     httpStatus: res?.status,
     onesqlResult: result,
+    responseKeys: resData ? Object.keys(resData) : null,
+    error: resData?.error || resData?.message || resData?.reason || null,
     innerKeys: innerData ? Object.keys(innerData) : null,
     innerDataPreview: null as any,
   }
@@ -594,12 +660,131 @@ async function executeOnesqlQuery(
 
   const onesql = `SELECT ${selectParts.join(', ')} FROM issue ${whereClause} ${groupByParts} ${orderClause} ${limitClause}`
 
-  const onesqlResult = await executeOnesql(teamUUID, onesql)
+  let onesqlResult: { rows: any[]; debug?: any }
+  try {
+    onesqlResult = await executeOnesql(teamUUID, onesql)
+  } catch (e: any) {
+    if (params.source_type === 'issue') {
+      const fallback = await executeIssueFallbackQuery(teamUUID, params, {
+        provider: 'onesql',
+        error: e?.message || String(e),
+        detail: e?.response?.data || null,
+      })
+      return {
+        rows: fallback.rows,
+        total: fallback.rows.length,
+        query_time_ms: Date.now() - startTime,
+        debug: fallback.debug,
+      }
+    }
+    throw e
+  }
+  if (onesqlResult.debug?.onesqlResult === 'FAIL' && params.source_type === 'issue') {
+    const fallback = await executeIssueFallbackQuery(teamUUID, params, onesqlResult.debug)
+    return {
+      rows: fallback.rows,
+      total: fallback.rows.length,
+      query_time_ms: Date.now() - startTime,
+      debug: fallback.debug,
+    }
+  }
+
   return {
     rows: onesqlResult.rows,
     total: onesqlResult.rows.length,
     query_time_ms: Date.now() - startTime,
     debug: onesqlResult.debug,
+  }
+}
+
+async function fetchIssueRowsByGraphQL(teamUUID: string, limit: number): Promise<any[]> {
+  const gqlRes = (await OPFetch(`/project/api/project/team/${teamUUID}/items/graphql?t=bi_issue_fallback`, {
+    method: 'POST',
+    teamUUID,
+    headers: { 'Content-Type': 'application/json' },
+    data: {
+      query: `{
+        tasks(limit: ${Math.min(Math.max(limit, 1), 1000)}) {
+          uuid
+          name
+          title
+          project { uuid name key identifier }
+          issueType { uuid name }
+          status { uuid name }
+          assign { uuid name }
+          owner { uuid name }
+        }
+      }`,
+      variables: {},
+    },
+  })) as any
+  const raw = gqlRes?.data?.tasks || gqlRes?.data?.data?.tasks || []
+  return Array.isArray(raw) ? raw.map(normalizeIssueRow) : []
+}
+
+function filterRows(rows: any[], filters: any[]): any[] {
+  if (!filters?.length) return rows
+  return rows.filter((row) =>
+    filters.every((f: any) => {
+      const actual = String(readField(row, f.field_key) ?? '')
+      if (f.operator === 'eq') return actual === String(f.value ?? '')
+      if (f.operator === 'in') return (f.value || []).map(String).includes(actual)
+      if (f.operator === 'like') return actual.includes(String(f.value ?? ''))
+      if (f.operator === 'gte') return actual >= String(f.value ?? '')
+      if (f.operator === 'lte') return actual <= String(f.value ?? '')
+      return true
+    }),
+  )
+}
+
+function aggregateIssueRows(rows: any[], params: any): any[] {
+  const chartType = params.chart_type || 'number'
+  const dimensions = chartType === 'number' ? [] : params.dimensions || []
+  const metrics = params.metrics?.length ? params.metrics : [{ name: 'count', aggregation: 'count' }]
+  const metricName = metrics[0]?.name || 'count'
+  const limit = Math.min(params.limit || 100, 1000)
+
+  if (chartType === 'table') {
+    return rows.slice(0, limit)
+  }
+
+  if (dimensions.length === 0) {
+    return [{ [metricName]: rows.length }]
+  }
+
+  const dim = dimensions[0]
+  const dimKey = dim.field_key || dim.name
+  const outKey = dim.name || dimKey
+  const grouped: Record<string, number> = {}
+  for (const row of rows) {
+    const key = String(readField(row, dimKey) || '未设置')
+    grouped[key] = (grouped[key] || 0) + 1
+  }
+
+  let result = Object.entries(grouped).map(([key, count]) => ({
+    [outKey]: key,
+    [metricName]: count,
+  }))
+  result = result.sort((a, b) => Number(b[metricName]) - Number(a[metricName]))
+  return result.slice(0, limit)
+}
+
+async function executeIssueFallbackQuery(
+  teamUUID: string,
+  params: any,
+  onesqlDebug: any,
+): Promise<{ rows: any[]; debug: any }> {
+  const sourceRows = await fetchIssueRowsByGraphQL(teamUUID, Math.min(params.limit || 100, 1000))
+  const filteredRows = filterRows(sourceRows, params.filters || [])
+  const rows = aggregateIssueRows(filteredRows, params)
+  return {
+    rows,
+    debug: {
+      provider: 'graphql_tasks_fallback',
+      source_rows: sourceRows.length,
+      filtered_rows: filteredRows.length,
+      onesql: onesqlDebug,
+    },
   }
 }
 
@@ -613,7 +798,7 @@ export async function biDetail(req: any): Promise<PluginResponse> {
   const { dataset_uuid, filters, page, page_size } = b
   if (!dataset_uuid) return { body: { error: '缺少 dataset_uuid' }, statusCode: 400 }
 
-  const ds = (await datasetEntity.get(dataset_uuid)) as any
+  const ds = await getDatasetOrDefault(dataset_uuid, teamUUID)
   if (!ds) return { body: { error: '数据集不存在' }, statusCode: 404 }
 
   const pageNum = page || 1
