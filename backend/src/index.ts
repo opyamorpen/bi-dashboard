@@ -200,7 +200,7 @@ export function UnInstall() {
 }
 
 export async function Enable() {
-  Logger.info('[BI] Enable — v0.4.21 improves 48px grid layout alignment and collision handling')
+  Logger.info('[BI] Enable — v0.4.22 separates dashboard view and edit layout modes')
 }
 
 export function Upgrade(oldVersion: any) {

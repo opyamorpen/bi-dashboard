@@ -65,6 +65,7 @@ const DEFAULT_DATASET_UUID = 'default_issue_dataset'
 interface Props {
   card: any
   dashboardUuid: string
+  editable?: boolean
   onDelete: () => void
   onCopy: () => void
   onDragStart?: (e: React.MouseEvent) => void
@@ -501,7 +502,7 @@ async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promi
   }
 }
 
-export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCopy, onDragStart }) => {
+export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, editable = false, onDelete, onCopy, onDragStart }) => {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -682,11 +683,13 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
         onMouseDown={onDragStart}
       >
         <span style={S.cardTitle}>{card.title}</span>
-        <div style={S.headerActions} onMouseDown={(e) => e.stopPropagation()}>
-          <button style={S.actionBtn} onClick={loadData} disabled={loading}>刷新</button>
-          <button style={S.actionBtn} onClick={onCopy}>复制</button>
-          <button style={S.deleteBtn} onClick={onDelete}>删除</button>
-        </div>
+        {editable && (
+          <div style={S.headerActions} onMouseDown={(e) => e.stopPropagation()}>
+            <button style={S.actionBtn} onClick={loadData} disabled={loading}>刷新</button>
+            <button style={S.actionBtn} onClick={onCopy}>复制</button>
+            <button style={S.deleteBtn} onClick={onDelete}>删除</button>
+          </div>
+        )}
       </div>
       <div style={S.cardBody}>
         <div style={getChartViewportStyle(card.chart_type)}>

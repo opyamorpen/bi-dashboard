@@ -4,6 +4,7 @@ import { ChartCard } from './ChartCard'
 import { AddCardModal } from './AddCardModal'
 
 const GRID_SIZE = 48
+const VIEW_CARD_GAP = 12
 const DEFAULT_CANVAS_WIDTH = 980
 const DEFAULT_CANVAS_HEIGHT = 560
 
@@ -14,13 +15,19 @@ const S: any = {
   btn: (p: boolean) => ({ padding: '6px 16px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, background: p ? '#1677ff' : '#f0f0f0', color: p ? '#fff' : '#333' }),
   content: { padding: 16 },
   boardScroll: { overflow: 'auto', border: '1px solid #d9dfe8', borderRadius: 8, background: '#f7f9fc' },
+  boardScrollView: { overflow: 'auto', border: 'none', borderRadius: 0, background: '#f5f5f5' },
   board: {
     position: 'relative' as any,
     backgroundColor: '#f7f9fc',
     backgroundImage: 'linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px)',
     backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
   },
+  boardView: {
+    position: 'relative' as any,
+    backgroundColor: '#f5f5f5',
+  },
   cardFrame: { position: 'absolute' as any, boxSizing: 'border-box' as any },
+  cardFrameView: { position: 'absolute' as any, boxSizing: 'border-box' as any, padding: VIEW_CARD_GAP / 2 },
   resizeHandle: {
     position: 'absolute' as any,
     right: 8,
@@ -56,6 +63,7 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [showAddCard, setShowAddCard] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
   const [localLayouts, setLocalLayouts] = useState<Record<string, any>>({})
 
   const loadDetail = useCallback(async () => {
@@ -257,8 +265,8 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
     (size: any, card: any, index: number) => {
       const layout = getCardLayout(card, index)
       return {
-        width: Math.max(size.width, (layout.x + layout.w) * GRID_SIZE + GRID_SIZE),
-        height: Math.max(size.height, (layout.y + layout.h) * GRID_SIZE + GRID_SIZE),
+        width: Math.max(size.width, (layout.x + layout.w) * GRID_SIZE + (isEditing ? GRID_SIZE : 0)),
+        height: Math.max(size.height, (layout.y + layout.h) * GRID_SIZE + (isEditing ? GRID_SIZE : 0)),
       }
     },
     { width: DEFAULT_CANVAS_WIDTH, height: DEFAULT_CANVAS_HEIGHT },
@@ -277,6 +285,15 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
       setShowAddCard(false)
       await loadDetail()
     } catch (e: any) { setMsg(e.message) }
+  }
+
+  function enterEditing() {
+    setIsEditing(true)
+  }
+
+  function exitEditing() {
+    setIsEditing(false)
+    setShowAddCard(false)
   }
 
   async function handleDeleteCard(cardUuid: string) {
@@ -312,8 +329,11 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
       <div style={S.header}>
         <button style={S.btn(false)} onClick={onBack}>← 返回</button>
         <h1 style={S.title}>{dashboard?.name || '仪表盘'}</h1>
-        <button style={S.btn(true)} onClick={() => setShowAddCard(true)}>+ 添加卡片</button>
+        {isEditing && <button style={S.btn(true)} onClick={() => setShowAddCard(true)}>+ 添加卡片</button>}
         <button style={S.btn(false)} onClick={() => loadDetail()}>刷新</button>
+        <button style={S.btn(isEditing)} onClick={isEditing ? exitEditing : enterEditing}>
+          {isEditing ? '完成编辑' : '编辑仪表盘'}
+        </button>
       </div>
       <div style={S.content}>
         {msg && <div style={S.msg}>{msg}</div>}
@@ -322,10 +342,10 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
             <p>暂无卡片，点击「+ 添加卡片」创建</p>
           </div>
         ) : (
-          <div style={S.boardScroll}>
+          <div style={isEditing ? S.boardScroll : S.boardScrollView}>
             <div
               style={{
-                ...S.board,
+                ...(isEditing ? S.board : S.boardView),
                 minWidth: canvasSize.width,
                 height: canvasSize.height,
               }}
@@ -337,7 +357,7 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
                   <div
                     key={card.card_uuid}
                     style={{
-                      ...S.cardFrame,
+                      ...(isEditing ? S.cardFrame : S.cardFrameView),
                       left: layout.x * GRID_SIZE,
                       top: layout.y * GRID_SIZE,
                       width: layout.w * GRID_SIZE,
@@ -347,11 +367,12 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
                     <ChartCard
                       card={card}
                       dashboardUuid={dashboardUuid}
+                      editable={isEditing}
                       onDelete={() => handleDeleteCard(card.card_uuid)}
                       onCopy={() => handleCopyCard(card)}
-                      onDragStart={(e) => startDrag(card, index, e)}
+                      onDragStart={isEditing ? (e) => startDrag(card, index, e) : undefined}
                     />
-                    <div style={S.resizeHandle} onMouseDown={(e) => startResize(card, index, e)} />
+                    {isEditing && <div style={S.resizeHandle} onMouseDown={(e) => startResize(card, index, e)} />}
                   </div>
                 )
               })()
