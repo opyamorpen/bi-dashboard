@@ -2,8 +2,9 @@ import { Logger } from '@ones-op/node-logger'
 import { storage } from '@ones-op/sdk/node'
 import type { PluginResponse } from '@ones-op/node-types'
 import { FetchAsAdmin, OPFetch } from '@ones-op/fetch'
+import * as http from 'http'
+import * as https from 'https'
 
-declare const require: any
 declare const Buffer: any
 declare const URL: any
 
@@ -254,7 +255,7 @@ function normalizeBaseUrl(baseUrl: string): string {
 function requestJson(urlText: string, apiKey: string, body: any): Promise<any> {
   return new Promise((resolve, reject) => {
     const url = new URL(urlText)
-    const mod = require(url.protocol === 'http:' ? 'http' : 'https')
+    const mod = url.protocol === 'http:' ? http : https
     const payload = JSON.stringify(body)
     const req = mod.request(
       {
