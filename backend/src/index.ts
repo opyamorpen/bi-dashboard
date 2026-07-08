@@ -140,6 +140,7 @@ function makeUuid(): string {
 
 function makeSafeKey(input: string): string {
   return String(input || '')
+    .toLowerCase()
     .replace(/[^A-Za-z0-9_]/g, '_')
     .slice(0, 64)
 }
