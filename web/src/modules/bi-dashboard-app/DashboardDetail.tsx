@@ -56,9 +56,11 @@ const S: any = {
 interface Props {
   dashboardUuid: string
   onBack: () => void
+  onOpenAiReport?: () => void
+  reloadToken?: number
 }
 
-export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
+export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack, onOpenAiReport, reloadToken = 0 }) => {
   const [dashboard, setDashboard] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
@@ -86,7 +88,7 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
     finally { setLoading(false) }
   }, [dashboardUuid, loadSnapshots])
 
-  useEffect(() => { loadDetail() }, [loadDetail])
+  useEffect(() => { loadDetail() }, [loadDetail, reloadToken])
 
   const cards: any[] = dashboard ? JSON.parse(dashboard.cards_json || '[]') : []
 
@@ -373,6 +375,7 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
       <div style={S.header}>
         <button style={S.btn(false)} onClick={onBack}>← 返回</button>
         <h1 style={S.title}>{dashboard?.name || '仪表盘'}</h1>
+        {onOpenAiReport && <button style={S.btn(true)} onClick={onOpenAiReport}>AI 生成卡片</button>}
         {isEditing && <button style={S.btn(true)} onClick={() => setShowAddCard(true)}>+ 添加卡片</button>}
         <button style={S.btn(false)} onClick={handleRefreshSnapshot} disabled={refreshingSnapshot}>
           {refreshingSnapshot ? '刷新快照中...' : '刷新快照'}

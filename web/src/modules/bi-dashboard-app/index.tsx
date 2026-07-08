@@ -25,21 +25,117 @@ const S: any = {
   btnRow: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
   section: { marginBottom: 16 },
   draftCard: { border: '1px solid #e8e8e8', borderRadius: 6, padding: 12, marginBottom: 8, background: '#fafafa' },
+  pasteBox: { border: '1px dashed #b7c7dc', borderRadius: 6, padding: 12, background: '#f7fbff', color: '#5b6f86', fontSize: 13 },
+  imagePreview: { marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, color: '#666', fontSize: 12 },
+  previewImg: { width: 72, height: 48, objectFit: 'cover' as any, borderRadius: 4, border: '1px solid #e8e8e8' },
+  chatBox: { border: '1px solid #e8e8e8', borderRadius: 6, padding: 10, background: '#fff', maxHeight: 180, overflow: 'auto', marginBottom: 12 },
+  chatMsg: (role: string) => ({ padding: '6px 8px', borderRadius: 6, marginBottom: 6, background: role === 'user' ? '#e6f4ff' : '#f6ffed', color: '#333', fontSize: 13 }),
 }
+
+const AiReportDialogContent: React.FC<any> = ({
+  aiBusy,
+  aiDraft,
+  aiImage,
+  aiMessages,
+  aiPrompt,
+  setAiDraft,
+  setAiImage,
+  setAiMessages,
+  setAiPrompt,
+  handleGenerateDraft,
+  handleCreateFromDraft,
+  handlePickImage,
+  handlePasteImage,
+  onCancel,
+}) => (
+  <>
+    <h3 style={{ marginBottom: 16 }}>AI 报表卡片需求对话框</h3>
+    {aiMessages.length > 0 && (
+      <div style={S.chatBox}>
+        {aiMessages.map((item: any, index: number) => (
+          <div key={index} style={S.chatMsg(item.role)}>
+            <strong>{item.role === 'user' ? '用户' : 'AI'}：</strong>{item.content}
+          </div>
+        ))}
+      </div>
+    )}
+    <div style={S.section}>
+      <label style={S.label}>{aiDraft ? '继续调整卡片需求' : '报表卡片需求'}</label>
+      <textarea
+        style={S.textarea}
+        value={aiPrompt}
+        onChange={(e) => setAiPrompt(e.target.value)}
+        onPaste={handlePasteImage}
+        placeholder={aiDraft ? '继续输入调整指令，例如：把第一张图改为按负责人分组，再加一张表格展示最近创建的需求。也可以直接粘贴截图。' : '描述要添加到当前仪表盘的报表卡片：数据范围、图表类型、分析指标和分析维度。也可以直接粘贴截图。'}
+      />
+    </div>
+    <div style={S.section}>
+      <label style={S.label}>图片输入</label>
+      <div style={S.pasteBox} onPaste={handlePasteImage} tabIndex={0}>
+        点击这里或在上方输入框内直接粘贴截图；也可以选择图片文件。
+        <div style={{ marginTop: 8 }}>
+          <input type="file" accept="image/*" onChange={(e) => handlePickImage(e.target.files?.[0])} />
+        </div>
+        {aiImage?.name && (
+          <div style={S.imagePreview}>
+            <img style={S.previewImg} src={aiImage.data_url} />
+            <span>已选择：{aiImage.name}</span>
+            <button style={{ ...S.btn(false), padding: '4px 10px', fontSize: 12 }} onClick={() => setAiImage(null)}>移除</button>
+          </div>
+        )}
+      </div>
+    </div>
+    <div style={{ ...S.btnRow, marginBottom: 16 }}>
+      <button style={S.btn(false)} onClick={onCancel}>取消</button>
+      <button style={S.btn(true)} onClick={handleGenerateDraft} disabled={aiBusy}>
+        {aiBusy ? '分析中...' : aiDraft ? '发送调整' : '生成草稿'}
+      </button>
+    </div>
+    {aiDraft && (
+      <div>
+        <h4 style={{ margin: '8px 0' }}>需求确认：{aiDraft.title}</h4>
+        {aiDraft.description && <p style={{ color: '#666', fontSize: 13 }}>{aiDraft.description}</p>}
+        <div style={S.draftCard}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>数据范围与筛选</div>
+          <div style={{ color: '#666', fontSize: 12 }}>
+            数据范围：{Object.keys(aiDraft.data_scope || {}).length > 0 ? JSON.stringify(aiDraft.data_scope) : '默认工作项数据集'}
+          </div>
+          <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>
+            筛选条件：{(aiDraft.filters || []).length > 0 ? JSON.stringify(aiDraft.filters) : '无'}
+          </div>
+        </div>
+        {(aiDraft.cards || []).map((card: any, index: number) => (
+          <div key={index} style={S.draftCard}>
+            <div style={{ fontWeight: 600 }}>{card.title}</div>
+            <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>
+              图表：{card.chart_type} / 指标：{card.metric?.name || 'count'}({card.metric?.aggregation || 'count'} {card.metric?.field_key || 'uuid'}) / 维度：{card.dimension?.name || '无维度'}
+            </div>
+          </div>
+        ))}
+        <div style={S.btnRow}>
+          <button style={S.btn(false)} onClick={() => { setAiDraft(null); setAiMessages([]); setAiPrompt('') }}>重新开始</button>
+          <button style={S.btn(true)} onClick={handleCreateFromDraft} disabled={aiBusy}>
+            确认添加到当前仪表盘
+          </button>
+        </div>
+      </div>
+    )}
+  </>
+)
 
 const App: React.FC = () => {
   const [dashboards, setDashboards] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [showCreate, setShowCreate] = useState(false)
-  const [showAiConfig, setShowAiConfig] = useState(false)
   const [showAiReport, setShowAiReport] = useState(false)
   const [newName, setNewName] = useState('')
   const [currentUuid, setCurrentUuid] = useState('')
-  const [aiConfig, setAiConfig] = useState<any>({ base_url: '', model: '', supports_vision: true, api_key: '' })
+  const [detailReloadToken, setDetailReloadToken] = useState(0)
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiImage, setAiImage] = useState<any>(null)
   const [aiDraft, setAiDraft] = useState<any>(null)
+  const [aiMessages, setAiMessages] = useState<any[]>([])
   const [aiBusy, setAiBusy] = useState(false)
 
   async function loadList() {
@@ -56,24 +152,11 @@ const App: React.FC = () => {
 
   useEffect(() => { loadList() }, [])
 
-  async function loadAiConfig() {
-    try {
-      const res = await apiGet('/bi/ai/config')
-      setAiConfig({ ...res.data, api_key: '' })
-    } catch (e: any) {
-      setMsg(e.message || '加载 AI 配置失败')
-    }
-  }
-
-  function openAiConfig() {
-    loadAiConfig()
-    setShowAiConfig(true)
-  }
-
   function openAiReport() {
     setAiPrompt('')
     setAiImage(null)
     setAiDraft(null)
+    setAiMessages([])
     setShowAiReport(true)
   }
 
@@ -95,15 +178,6 @@ const App: React.FC = () => {
     } catch (e: any) { setMsg(e.message) }
   }
 
-  async function handleSaveAiConfig() {
-    try {
-      await apiPost('/bi/ai/config', aiConfig)
-      setShowAiConfig(false)
-    } catch (e: any) {
-      setMsg(e.message || '保存 AI 配置失败')
-    }
-  }
-
   function fileToDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
@@ -122,16 +196,40 @@ const App: React.FC = () => {
     setAiImage({ name: file.name, mime_type: file.type, data_url: dataUrl })
   }
 
+  async function handlePasteImage(e: React.ClipboardEvent) {
+    const items = Array.from(e.clipboardData?.items || [])
+    const imageItem = items.find((item) => item.type.startsWith('image/'))
+    if (!imageItem) return
+    const file = imageItem.getAsFile()
+    if (!file) return
+    e.preventDefault()
+    await handlePickImage(file)
+  }
+
   async function handleGenerateDraft() {
     if (!aiPrompt.trim()) {
-      setMsg('请输入报表需求')
+      setMsg(aiDraft ? '请输入调整指令' : '请输入报表需求')
       return
     }
+    const userText = aiPrompt.trim()
     setAiBusy(true)
     setMsg('')
+    const nextMessages = [...aiMessages, { role: 'user', content: userText }]
+    setAiMessages(nextMessages)
     try {
-      const res = await apiPost('/bi/ai/report-draft', { prompt: aiPrompt.trim(), image: aiImage })
-      setAiDraft(res.data?.draft)
+      const res = await apiPost('/bi/ai/report-draft', {
+        prompt: userText,
+        image: aiImage,
+        current_draft: aiDraft,
+        history: nextMessages,
+      })
+      const draft = res.data?.draft
+      setAiDraft(draft)
+      setAiMessages([
+        ...nextMessages,
+        { role: 'assistant', content: res.data?.summary || `已更新需求分析：${draft?.title || ''}` },
+      ])
+      setAiPrompt('')
     } catch (e: any) {
       setMsg(e.message || '生成报表草稿失败')
     } finally {
@@ -140,24 +238,56 @@ const App: React.FC = () => {
   }
 
   async function handleCreateFromDraft() {
-    if (!aiDraft) return
+    if (!aiDraft || !currentUuid) return
     setAiBusy(true)
     try {
-      const res = await apiPost('/bi/report/from-draft', { draft: aiDraft })
-      const uuid = res.data?.dashboard_uuid
+      await apiPost('/bi/report/from-draft', { draft: aiDraft, dashboard_uuid: currentUuid })
       setShowAiReport(false)
       setAiDraft(null)
-      await loadList()
-      if (uuid) setCurrentUuid(uuid)
+      setAiMessages([])
+      setAiPrompt('')
+      setAiImage(null)
+      setDetailReloadToken((value) => value + 1)
     } catch (e: any) {
-      setMsg(e.message || '创建固定报表失败')
+      setMsg(e.message || '添加 AI 卡片失败')
     } finally {
       setAiBusy(false)
     }
   }
 
   if (currentUuid) {
-    return <DashboardDetail dashboardUuid={currentUuid} onBack={() => { setCurrentUuid(''); loadList() }} />
+    return (
+      <>
+        <DashboardDetail
+          dashboardUuid={currentUuid}
+          reloadToken={detailReloadToken}
+          onOpenAiReport={openAiReport}
+          onBack={() => { setCurrentUuid(''); loadList() }}
+        />
+        {showAiReport && (
+          <div style={S.modalOverlay} onClick={() => setShowAiReport(false)}>
+            <div style={S.wideModal} onClick={(e) => e.stopPropagation()}>
+              <AiReportDialogContent
+                aiBusy={aiBusy}
+                aiDraft={aiDraft}
+                aiImage={aiImage}
+                aiMessages={aiMessages}
+                aiPrompt={aiPrompt}
+                setAiDraft={setAiDraft}
+                setAiImage={setAiImage}
+                setAiMessages={setAiMessages}
+                setAiPrompt={setAiPrompt}
+                handleGenerateDraft={handleGenerateDraft}
+                handleCreateFromDraft={handleCreateFromDraft}
+                handlePickImage={handlePickImage}
+                handlePasteImage={handlePasteImage}
+                onCancel={() => setShowAiReport(false)}
+              />
+            </div>
+          </div>
+        )}
+      </>
+    )
   }
 
   return (
@@ -165,9 +295,7 @@ const App: React.FC = () => {
       <div style={S.header}>
         <h1 style={S.title}>固定报表中心</h1>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button style={S.btn(false)} onClick={openAiConfig}>AI 配置</button>
-          <button style={S.btn(true)} onClick={openAiReport}>AI 生成报表</button>
-          <button style={S.btn(false)} onClick={() => setShowCreate(true)}>手动新建</button>
+          <button style={S.btn(true)} onClick={() => setShowCreate(true)}>新建仪表盘</button>
         </div>
       </div>
       <div style={S.content}>
@@ -177,7 +305,7 @@ const App: React.FC = () => {
         ) : dashboards.length === 0 ? (
           <div style={S.empty}>
             <p>暂无仪表盘</p>
-            <button style={S.btn(true)} onClick={openAiReport}>生成第一个固定报表</button>
+            <button style={S.btn(true)} onClick={() => setShowCreate(true)}>创建第一个仪表盘</button>
           </div>
         ) : (
           <div style={S.grid}>
@@ -206,89 +334,6 @@ const App: React.FC = () => {
               <button style={S.btn(false)} onClick={() => setShowCreate(false)}>取消</button>
               <button style={S.btn(true)} onClick={handleCreate}>创建</button>
             </div>
-          </div>
-        </div>
-      )}
-      {showAiConfig && (
-        <div style={S.modalOverlay} onClick={() => setShowAiConfig(false)}>
-          <div style={S.modal} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginBottom: 16 }}>AI 配置</h3>
-            <div style={S.section}>
-              <label style={S.label}>Base URL</label>
-              <input style={S.input} value={aiConfig.base_url || ''} onChange={(e) => setAiConfig({ ...aiConfig, base_url: e.target.value })} placeholder="https://api.openai.com/v1" />
-            </div>
-            <div style={S.section}>
-              <label style={S.label}>Model</label>
-              <input style={S.input} value={aiConfig.model || ''} onChange={(e) => setAiConfig({ ...aiConfig, model: e.target.value })} placeholder="gpt-4.1" />
-            </div>
-            <div style={S.section}>
-              <label style={S.label}>API Key</label>
-              <input style={S.input} type="password" value={aiConfig.api_key || ''} onChange={(e) => setAiConfig({ ...aiConfig, api_key: e.target.value })} placeholder={aiConfig.has_api_key ? '已配置，留空则不修改' : '请输入 API Key'} />
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-              <input type="checkbox" checked={Boolean(aiConfig.supports_vision)} onChange={(e) => setAiConfig({ ...aiConfig, supports_vision: e.target.checked })} />
-              支持图片输入
-            </label>
-            <div style={{ ...S.btnRow, marginTop: 18 }}>
-              <button style={S.btn(false)} onClick={() => setShowAiConfig(false)}>取消</button>
-              <button style={S.btn(true)} onClick={handleSaveAiConfig}>保存</button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showAiReport && (
-        <div style={S.modalOverlay} onClick={() => setShowAiReport(false)}>
-          <div style={S.wideModal} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginBottom: 16 }}>AI 报表需求对话框</h3>
-            <div style={S.section}>
-              <label style={S.label}>报表需求</label>
-              <textarea
-                style={S.textarea}
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                placeholder="描述报表数据范围、图表类型、分析指标和分析维度。例如：统计当前团队所有工作项总数，按状态、工作项类型、负责人分别做柱状图，并展示最近创建的工作项表格。"
-              />
-            </div>
-            <div style={S.section}>
-              <label style={S.label}>图片输入</label>
-              <input type="file" accept="image/*" onChange={(e) => handlePickImage(e.target.files?.[0])} />
-              {aiImage?.name && <div style={S.cardMeta}>已选择：{aiImage.name}</div>}
-            </div>
-            <div style={{ ...S.btnRow, marginBottom: 16 }}>
-              <button style={S.btn(false)} onClick={() => setShowAiReport(false)}>取消</button>
-              <button style={S.btn(true)} onClick={handleGenerateDraft} disabled={aiBusy}>
-                {aiBusy ? '生成中...' : '生成草稿'}
-              </button>
-            </div>
-            {aiDraft && (
-              <div>
-                <h4 style={{ margin: '8px 0' }}>需求确认：{aiDraft.title}</h4>
-                {aiDraft.description && <p style={{ color: '#666', fontSize: 13 }}>{aiDraft.description}</p>}
-                <div style={S.draftCard}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>数据范围与筛选</div>
-                  <div style={{ color: '#666', fontSize: 12 }}>
-                    数据范围：{Object.keys(aiDraft.data_scope || {}).length > 0 ? JSON.stringify(aiDraft.data_scope) : '默认工作项数据集'}
-                  </div>
-                  <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>
-                    筛选条件：{(aiDraft.filters || []).length > 0 ? JSON.stringify(aiDraft.filters) : '无'}
-                  </div>
-                </div>
-                {(aiDraft.cards || []).map((card: any, index: number) => (
-                  <div key={index} style={S.draftCard}>
-                    <div style={{ fontWeight: 600 }}>{card.title}</div>
-                    <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>
-                      图表：{card.chart_type} / 指标：{card.metric?.name || 'count'}({card.metric?.aggregation || 'count'} {card.metric?.field_key || 'uuid'}) / 维度：{card.dimension?.name || '无维度'}
-                    </div>
-                  </div>
-                ))}
-                <div style={S.btnRow}>
-                  <button style={S.btn(false)} onClick={() => setAiDraft(null)}>重新生成</button>
-                  <button style={S.btn(true)} onClick={handleCreateFromDraft} disabled={aiBusy}>
-                    确认创建固定报表
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}

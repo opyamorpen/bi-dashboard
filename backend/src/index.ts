@@ -506,11 +506,26 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
     'chart_type 只能使用: number,bar,pie,donut,table。',
     'aggregation 只能使用: count,count_distinct。',
     '返回结构必须是 {title,description,data_scope,filters,cards}。',
+    '如果用户是在已有草稿基础上提出调整，你必须基于当前草稿修改，而不是重新开始。',
   ].join('\n')
+  const history = Array.isArray(b.history) ? b.history.slice(-10) : []
+  const currentDraft = b.current_draft ? sanitizeReportDraft(b.current_draft) : null
+  const historyText = history
+    .map((item: any) => `${item.role === 'assistant' ? 'AI' : '用户'}: ${String(item.content || '').slice(0, 800)}`)
+    .join('\n')
+  const promptText = currentDraft
+    ? [
+        '当前已有报表草稿如下：',
+        JSON.stringify(currentDraft),
+        historyText ? `\n最近对话：\n${historyText}` : '',
+        `\n用户新的调整指令：\n${prompt}`,
+        '请输出调整后的完整 ReportDraft JSON。',
+      ].join('\n')
+    : `${systemPrompt}\n\n用户报表需求：\n${prompt}`
   const content: any[] = [
     {
       type: 'text',
-      text: `${systemPrompt}\n\n用户报表需求：\n${prompt}`,
+      text: promptText,
     },
   ]
   if (b.image?.data_url) {
@@ -528,7 +543,7 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
     })
     const text = json?.choices?.[0]?.message?.content || ''
     const draft = sanitizeReportDraft(extractJsonObject(text))
-    return { body: { data: { draft } } }
+    return { body: { data: { draft, summary: draft.description || `已生成「${draft.title}」` } } }
   } catch (e: any) {
     Logger.error('[BI] generateReportDraft failed:', e?.message || e)
     return { body: { error: e?.message || 'AI 草稿生成失败' }, statusCode: 500 }
@@ -540,9 +555,47 @@ export async function createReportFromDraft(req: any): Promise<PluginResponse> {
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   const draft = sanitizeReportDraft(b.draft || b)
-  const uuid = makeUuid()
   const now = Date.now()
   const cards = draft.cards.map((card: any, index: number) => draftCardToStoredCard(card, index, draft.filters || []))
+  const targetDashboardUuid = String(b.dashboard_uuid || '')
+  if (targetDashboardUuid) {
+    const d = (await dashboardEntity.get(targetDashboardUuid)) as any
+    if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
+    if (d.team_uuid !== teamUUID) return { body: { error: '仪表盘不属于当前团队' }, statusCode: 403 }
+    const existingCards = safeJsonParse(d.cards_json, [])
+    const nextConfig = {
+      ...safeJsonParse(d.config_json, {}),
+      report_mode: 'fixed',
+      source: 'ai_draft',
+      snapshot_policy: 'manual',
+      last_ai_draft: draft,
+    }
+    await dashboardEntity.set(
+      targetDashboardUuid,
+      cleanForSet({
+        ...d,
+        config_json: jsonText(nextConfig),
+        cards_json: jsonText([...(Array.isArray(existingCards) ? existingCards : []), ...cards]),
+        updated_at: now,
+      }),
+    )
+    await writeAudit(teamUUID, 'dashboard', targetDashboardUuid, 'AI追加报表卡片', operator, {
+      name: d.name,
+      card_count: cards.length,
+    })
+    return {
+      body: {
+        data: {
+          dashboard_uuid: targetDashboardUuid,
+          name: d.name,
+          card_count: cards.length,
+          append: true,
+        },
+      },
+    }
+  }
+
+  const uuid = makeUuid()
   const config = {
     layout: 'grid',
     report_mode: 'fixed',
