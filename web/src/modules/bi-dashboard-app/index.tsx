@@ -19,17 +19,47 @@ const S: any = {
   label: { fontSize: 13, fontWeight: 500, marginBottom: 6, display: 'block' },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' },
   modal: { background: '#fff', borderRadius: 8, padding: 24, width: 400, maxWidth: '90vw' },
-  wideModal: { background: '#fff', borderRadius: 8, padding: 24, width: 720, maxWidth: '92vw', maxHeight: '86vh', overflow: 'auto' },
+  wideModal: { background: '#fff', borderRadius: 8, padding: 0, width: 820, maxWidth: '92vw', height: '86vh', maxHeight: '86vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' as any },
   msg: { fontSize: 13, padding: '8px 12px', borderRadius: 4, margin: '8px 0', background: '#fff2f0', color: '#ff4d4f', border: '1px solid #ffccc7' },
   textarea: { padding: '8px 12px', borderRadius: 4, border: '1px solid #d9d9d9', fontSize: 14, width: '100%', minHeight: 120, boxSizing: 'border-box' as any, resize: 'vertical' as any },
   btnRow: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
   section: { marginBottom: 16 },
   draftCard: { border: '1px solid #e8e8e8', borderRadius: 6, padding: 12, marginBottom: 8, background: '#fafafa' },
-  pasteBox: { border: '1px dashed #b7c7dc', borderRadius: 6, padding: 12, background: '#f7fbff', color: '#5b6f86', fontSize: 13 },
-  imagePreview: { marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, color: '#666', fontSize: 12 },
-  previewImg: { width: 72, height: 48, objectFit: 'cover' as any, borderRadius: 4, border: '1px solid #e8e8e8' },
-  chatBox: { border: '1px solid #e8e8e8', borderRadius: 6, padding: 10, background: '#fff', maxHeight: 180, overflow: 'auto', marginBottom: 12 },
-  chatMsg: (role: string) => ({ padding: '6px 8px', borderRadius: 6, marginBottom: 6, background: role === 'user' ? '#e6f4ff' : '#f6ffed', color: '#333', fontSize: 13 }),
+  chatHeader: { padding: '18px 22px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  chatTitle: { fontSize: 18, fontWeight: 600, margin: 0 },
+  chatStream: { flex: 1, overflow: 'auto', padding: '18px 22px', background: '#fff' },
+  chatMsgWrap: (role: string) => ({ display: 'flex', justifyContent: role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 12 }),
+  chatMsg: (role: string) => ({ maxWidth: '78%', whiteSpace: 'pre-wrap' as any, lineHeight: 1.65, padding: '10px 12px', borderRadius: 10, background: role === 'user' ? '#e6f4ff' : role === 'process' ? '#fafafa' : '#f6ffed', border: role === 'process' ? '1px solid #e8e8e8' : 'none', color: '#333', fontSize: 13 }),
+  composer: { borderTop: '1px solid #f0f0f0', padding: 14, background: '#fff' },
+  composerBox: { border: '1px solid #d9d9d9', borderRadius: 10, padding: 10, background: '#fff' },
+  composerInput: { width: '100%', minHeight: 64, maxHeight: 160, resize: 'vertical' as any, border: 'none', outline: 'none', fontSize: 14, lineHeight: 1.6, boxSizing: 'border-box' as any },
+  composerFooter: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
+  composerLeft: { display: 'flex', alignItems: 'center', gap: 8 },
+  plusBtn: { width: 30, height: 30, borderRadius: '50%', border: '1px solid #d9d9d9', background: '#fff', cursor: 'pointer', fontSize: 20, lineHeight: '26px', color: '#4e5969' },
+  attachmentChip: { display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #e8e8e8', borderRadius: 999, padding: '4px 8px', fontSize: 12, color: '#4e5969', background: '#fafafa' },
+  statusPill: { fontSize: 12, color: '#86909c', marginRight: 8 },
+  sendBtn: { padding: '7px 16px', borderRadius: 8, border: 'none', background: '#1677ff', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 },
+}
+
+function formatDraftSummary(draft: any): string {
+  if (!draft) return '已生成报表卡片草稿。'
+  const filters = (draft.filters || []).length > 0 ? JSON.stringify(draft.filters) : '无'
+  const scope = Object.keys(draft.data_scope || {}).length > 0 ? JSON.stringify(draft.data_scope) : '默认工作项数据集'
+  const cards = (draft.cards || [])
+    .map((card: any, index: number) => {
+      const metric = `${card.metric?.name || 'count'}(${card.metric?.aggregation || 'count'} ${card.metric?.field_key || 'uuid'})`
+      const dimension = card.dimension?.name || card.dimension?.field_key || '无维度'
+      return `${index + 1}. ${card.title}：${card.chart_type}，指标 ${metric}，维度 ${dimension}`
+    })
+    .join('\n')
+  return [
+    `我理解的报表卡片需求：${draft.title}`,
+    draft.description ? `说明：${draft.description}` : '',
+    `数据范围：${scope}`,
+    `筛选条件：${filters}`,
+    `卡片设计：\n${cards || '暂无卡片'}`,
+    '可以继续告诉我如何调整，确认后我会把这些卡片添加到当前仪表盘。',
+  ].filter(Boolean).join('\n')
 }
 
 const AiReportDialogContent: React.FC<any> = ({
@@ -47,81 +77,71 @@ const AiReportDialogContent: React.FC<any> = ({
   handlePickImage,
   handlePasteImage,
   onCancel,
-}) => (
-  <>
-    <h3 style={{ marginBottom: 16 }}>AI 报表卡片需求对话框</h3>
-    {aiMessages.length > 0 && (
-      <div style={S.chatBox}>
-        {aiMessages.map((item: any, index: number) => (
-          <div key={index} style={S.chatMsg(item.role)}>
-            <strong>{item.role === 'user' ? '用户' : 'AI'}：</strong>{item.content}
-          </div>
-        ))}
+}) => {
+  const fileInputId = 'bi-ai-image-input'
+  const statusText = aiBusy ? '正在分析' : aiDraft ? '草稿待确认' : '等待输入'
+  const processText = aiBusy
+    ? '执行过程：\n1. 读取当前对话和附件上下文\n2. 解析数据范围、指标、维度和图表类型\n3. 校验字段和图表白名单\n4. 生成可添加到仪表盘的卡片草稿'
+    : aiDraft
+      ? '执行过程：\n1. 已完成需求解析\n2. 已完成字段和图表类型校验\n3. 等待继续调整或确认添加'
+      : '执行过程：等待输入需求；可以粘贴截图或点击左下角 + 添加图片。'
+
+  return (
+    <>
+      <div style={S.chatHeader}>
+        <h3 style={S.chatTitle}>AI 报表卡片需求对话</h3>
+        <button style={S.btn(false)} onClick={onCancel}>关闭</button>
       </div>
-    )}
-    <div style={S.section}>
-      <label style={S.label}>{aiDraft ? '继续调整卡片需求' : '报表卡片需求'}</label>
-      <textarea
-        style={S.textarea}
-        value={aiPrompt}
-        onChange={(e) => setAiPrompt(e.target.value)}
-        onPaste={handlePasteImage}
-        placeholder={aiDraft ? '继续输入调整指令，例如：把第一张图改为按负责人分组，再加一张表格展示最近创建的需求。也可以直接粘贴截图。' : '描述要添加到当前仪表盘的报表卡片：数据范围、图表类型、分析指标和分析维度。也可以直接粘贴截图。'}
-      />
-    </div>
-    <div style={S.section}>
-      <label style={S.label}>图片输入</label>
-      <div style={S.pasteBox} onPaste={handlePasteImage} tabIndex={0}>
-        点击这里或在上方输入框内直接粘贴截图；也可以选择图片文件。
-        <div style={{ marginTop: 8 }}>
-          <input type="file" accept="image/*" onChange={(e) => handlePickImage(e.target.files?.[0])} />
-        </div>
-        {aiImage?.name && (
-          <div style={S.imagePreview}>
-            <img style={S.previewImg} src={aiImage.data_url} />
-            <span>已选择：{aiImage.name}</span>
-            <button style={{ ...S.btn(false), padding: '4px 10px', fontSize: 12 }} onClick={() => setAiImage(null)}>移除</button>
+      <div style={S.chatStream}>
+        {aiMessages.length === 0 && (
+          <div style={S.chatMsgWrap('assistant')}>
+            <div style={S.chatMsg('assistant')}>描述你想在当前仪表盘里添加的报表卡片。可以直接粘贴截图，我会先分析需求，再根据你的多轮调整生成最终卡片草稿。</div>
           </div>
         )}
-      </div>
-    </div>
-    <div style={{ ...S.btnRow, marginBottom: 16 }}>
-      <button style={S.btn(false)} onClick={onCancel}>取消</button>
-      <button style={S.btn(true)} onClick={handleGenerateDraft} disabled={aiBusy}>
-        {aiBusy ? '分析中...' : aiDraft ? '发送调整' : '生成草稿'}
-      </button>
-    </div>
-    {aiDraft && (
-      <div>
-        <h4 style={{ margin: '8px 0' }}>需求确认：{aiDraft.title}</h4>
-        {aiDraft.description && <p style={{ color: '#666', fontSize: 13 }}>{aiDraft.description}</p>}
-        <div style={S.draftCard}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>数据范围与筛选</div>
-          <div style={{ color: '#666', fontSize: 12 }}>
-            数据范围：{Object.keys(aiDraft.data_scope || {}).length > 0 ? JSON.stringify(aiDraft.data_scope) : '默认工作项数据集'}
-          </div>
-          <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>
-            筛选条件：{(aiDraft.filters || []).length > 0 ? JSON.stringify(aiDraft.filters) : '无'}
-          </div>
-        </div>
-        {(aiDraft.cards || []).map((card: any, index: number) => (
-          <div key={index} style={S.draftCard}>
-            <div style={{ fontWeight: 600 }}>{card.title}</div>
-            <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>
-              图表：{card.chart_type} / 指标：{card.metric?.name || 'count'}({card.metric?.aggregation || 'count'} {card.metric?.field_key || 'uuid'}) / 维度：{card.dimension?.name || '无维度'}
+        {aiMessages.map((item: any, index: number) => (
+          <div key={index} style={S.chatMsgWrap(item.role)}>
+            <div style={S.chatMsg(item.role)}>
+              <strong>{item.role === 'user' ? '用户' : item.role === 'process' ? '过程' : 'AI'}：</strong>
+              {item.content}
             </div>
           </div>
         ))}
-        <div style={S.btnRow}>
-          <button style={S.btn(false)} onClick={() => { setAiDraft(null); setAiMessages([]); setAiPrompt('') }}>重新开始</button>
-          <button style={S.btn(true)} onClick={handleCreateFromDraft} disabled={aiBusy}>
-            确认添加到当前仪表盘
-          </button>
+        <div style={S.chatMsgWrap('process')}>
+          <div style={S.chatMsg('process')}>{processText}</div>
         </div>
       </div>
-    )}
-  </>
-)
+      <div style={S.composer}>
+        <div style={S.composerBox}>
+          <textarea
+            style={S.composerInput}
+            value={aiPrompt}
+            onChange={(e) => setAiPrompt(e.target.value)}
+            onPaste={handlePasteImage}
+            placeholder={aiDraft ? '继续输入调整指令...' : '输入报表卡片需求，或直接粘贴截图...'}
+          />
+          <div style={S.composerFooter}>
+            <div style={S.composerLeft}>
+              <label htmlFor={fileInputId} style={S.plusBtn}>+</label>
+              <input id={fileInputId} type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => handlePickImage(e.target.files?.[0])} />
+              {aiImage?.name && (
+                <span style={S.attachmentChip}>
+                  图片：{aiImage.name}
+                  <button style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#86909c' }} onClick={() => setAiImage(null)}>×</button>
+                </span>
+              )}
+            </div>
+            <div>
+              <span style={S.statusPill}>{statusText}</span>
+              {aiDraft && <button style={{ ...S.btn(false), marginRight: 8 }} onClick={() => { setAiDraft(null); setAiMessages([]); setAiPrompt('') }}>重新开始</button>}
+              {aiDraft && <button style={{ ...S.btn(true), marginRight: 8 }} onClick={handleCreateFromDraft} disabled={aiBusy}>确认添加</button>}
+              <button style={S.sendBtn} onClick={handleGenerateDraft} disabled={aiBusy}>{aiBusy ? '发送中...' : '发送'}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
 
 const App: React.FC = () => {
   const [dashboards, setDashboards] = useState<any[]>([])
@@ -227,7 +247,7 @@ const App: React.FC = () => {
       setAiDraft(draft)
       setAiMessages([
         ...nextMessages,
-        { role: 'assistant', content: res.data?.summary || `已更新需求分析：${draft?.title || ''}` },
+        { role: 'assistant', content: formatDraftSummary(draft) },
       ])
       setAiPrompt('')
     } catch (e: any) {
