@@ -569,10 +569,56 @@ function sanitizeAiReportSession(input: any): any {
         .filter((item: any) => item.content || item.images.length > 0)
     : []
   return {
+    session_uuid: String(input?.session_uuid || makeUuid()).slice(0, 64),
+    title: String(input?.title || '').slice(0, 120),
     messages,
     draft: input?.draft ? sanitizeReportDraft(input.draft) : null,
     updated_at: Number(input?.updated_at || 0),
+    created_at: Number(input?.created_at || input?.updated_at || 0),
   }
+}
+
+function summarizeAiReportSession(session: any): any {
+  const messages = Array.isArray(session.messages) ? session.messages : []
+  const firstUser = messages.find((message: any) => message.role === 'user')
+  const lastMessage = messages[messages.length - 1]
+  return {
+    session_uuid: session.session_uuid,
+    title:
+      session.title ||
+      session.draft?.title ||
+      String(firstUser?.content || '未命名对话').slice(0, 40),
+    preview: String(lastMessage?.content || firstUser?.content || '').slice(0, 80),
+    message_count: messages.length,
+    has_draft: Boolean(session.draft),
+    updated_at: Number(session.updated_at || 0),
+    created_at: Number(session.created_at || session.updated_at || 0),
+  }
+}
+
+function getAiSessionStore(config: any): any {
+  const sessions = Array.isArray(config.ai_report_sessions)
+    ? config.ai_report_sessions.map(sanitizeAiReportSession)
+    : []
+  const legacy = config.ai_report_session
+  if (
+    legacy &&
+    typeof legacy === 'object' &&
+    !Array.isArray(legacy) &&
+    ((Array.isArray(legacy.messages) && legacy.messages.length > 0) || legacy.draft)
+  ) {
+    const legacySession = sanitizeAiReportSession({
+      ...legacy,
+      session_uuid: legacy.session_uuid || 'legacy',
+      title: legacy.title || legacy.draft?.title || '历史 AI 对话',
+      created_at: legacy.created_at || legacy.updated_at || 0,
+    })
+    if (!sessions.some((session: any) => session.session_uuid === legacySession.session_uuid)) {
+      sessions.push(legacySession)
+    }
+  }
+  sessions.sort((a: any, b: any) => Number(b.updated_at || 0) - Number(a.updated_at || 0))
+  return { sessions: sessions.slice(0, 12) }
 }
 
 function draftCardToStoredCard(card: any, index: number, filters: any[] = []): any {
@@ -961,7 +1007,20 @@ export async function getAiReportSession(req: any): Promise<PluginResponse> {
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
   if (d.team_uuid !== teamUUID) return { body: { error: '仪表盘不属于当前团队' }, statusCode: 403 }
   const config = safeJsonParse(d.config_json, {})
-  return { body: { data: sanitizeAiReportSession(config.ai_report_session || {}) } }
+  const store = getAiSessionStore(config)
+  const sessionUUID = String(getParam(req, 'session_uuid') || getParam(req, 'sessionUUID') || '')
+  const current = sessionUUID
+    ? store.sessions.find((session: any) => session.session_uuid === sessionUUID) || null
+    : null
+  return {
+    body: {
+      data: {
+        session: current,
+        sessions: store.sessions.map(summarizeAiReportSession),
+        session_items: store.sessions,
+      },
+    },
+  }
 }
 
 export async function saveAiReportSession(req: any): Promise<PluginResponse> {
@@ -971,14 +1030,32 @@ export async function saveAiReportSession(req: any): Promise<PluginResponse> {
   const d = (await dashboardEntity.get(dashboardUuid)) as any
   if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
   if (d.team_uuid !== teamUUID) return { body: { error: '仪表盘不属于当前团队' }, statusCode: 403 }
-  const session = sanitizeAiReportSession({ ...(req.body || {}), updated_at: Date.now() })
+  const body = req.body || {}
+  const now = Date.now()
+  const session = sanitizeAiReportSession({
+    ...body,
+    session_uuid: body.session_uuid || makeUuid(),
+    updated_at: now,
+    created_at: body.created_at || now,
+  })
+  const previousConfig = safeJsonParse(d.config_json, {})
+  const store = getAiSessionStore(previousConfig)
+  const withoutCurrent = store.sessions.filter(
+    (item: any) => item.session_uuid !== session.session_uuid,
+  )
+  const nextSessions =
+    session.messages.length > 0 || session.draft
+      ? [session, ...withoutCurrent].slice(0, 12)
+      : withoutCurrent
   const config = {
-    ...safeJsonParse(d.config_json, {}),
-    ai_report_session: session,
+    ...previousConfig,
+    ai_report_sessions: nextSessions,
+    ai_report_session: null,
   }
   const fallbackConfig = {
     ...config,
-    ai_report_session: { messages: [], draft: null, updated_at: session.updated_at },
+    ai_report_sessions: nextSessions.map(summarizeAiReportSession),
+    ai_report_session: null,
   }
   await dashboardEntity.set(
     dashboardUuid,
@@ -988,7 +1065,15 @@ export async function saveAiReportSession(req: any): Promise<PluginResponse> {
       updated_at: Date.now(),
     }),
   )
-  return { body: { data: session } }
+  return {
+    body: {
+      data: {
+        session,
+        sessions: nextSessions.map(summarizeAiReportSession),
+        session_items: nextSessions,
+      },
+    },
+  }
 }
 
 export async function listDashboardSnapshots(req: any): Promise<PluginResponse> {

@@ -229,6 +229,39 @@ const S: any = {
   cardItemTitle: { fontWeight: 600, marginBottom: 6 },
   cardItemMeta: { color: '#4e5969', fontSize: 12, lineHeight: 1.6 },
   confirmActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 },
+  historyPanel: {
+    margin: '0 22px 12px',
+    borderTop: '1px solid #f0f0f0',
+    paddingTop: 10,
+  },
+  historyTitle: { fontSize: 12, color: '#86909c', marginBottom: 8 },
+  historyList: { display: 'flex', gap: 8, overflowX: 'auto' as any, paddingBottom: 2 },
+  historyItem: (active: boolean) => ({
+    minWidth: 180,
+    maxWidth: 260,
+    border: active ? '1px solid #1677ff' : '1px solid #e8e8e8',
+    borderRadius: 8,
+    padding: '8px 10px',
+    background: active ? '#e6f4ff' : '#fff',
+    cursor: 'pointer',
+    textAlign: 'left' as any,
+    color: '#1f2329',
+  }),
+  historyItemTitle: {
+    fontSize: 13,
+    fontWeight: 600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  historyItemMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#86909c',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
 }
 
 const CHART_TYPE_LABELS: Record<string, string> = {
@@ -415,6 +448,8 @@ const ThinkingDetails: React.FC<any> = ({ message }) => {
 }
 
 const AiReportDialogContent: React.FC<any> = ({
+  aiSessionUuid,
+  aiHistory,
   aiBusy,
   aiDraft,
   aiImage,
@@ -431,6 +466,7 @@ const AiReportDialogContent: React.FC<any> = ({
   handleResetAiSession,
   handlePickImage,
   handlePasteImage,
+  handleSelectAiSession,
   onCancel,
 }) => {
   const fileInputId = 'bi-ai-image-input'
@@ -478,6 +514,28 @@ const AiReportDialogContent: React.FC<any> = ({
         ))}
       </div>
       <DraftConfirmCard draft={aiDraft} aiBusy={aiBusy} onConfirm={handleCreateFromDraft} />
+      {aiHistory.length > 0 && (
+        <div style={S.historyPanel}>
+          <div style={S.historyTitle}>历史会话</div>
+          <div style={S.historyList}>
+            {aiHistory.map((session: any) => (
+              <button
+                key={session.session_uuid}
+                style={S.historyItem(session.session_uuid === aiSessionUuid)}
+                onClick={() => handleSelectAiSession(session.session_uuid)}
+                disabled={aiBusy}
+              >
+                <div style={S.historyItemTitle}>{session.title || '未命名对话'}</div>
+                <div style={S.historyItemMeta}>
+                  {session.message_count || 0} 条消息
+                  {session.has_draft ? ' / 有草稿' : ''}
+                </div>
+                {session.preview && <div style={S.historyItemMeta}>{session.preview}</div>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={S.composer}>
         <div style={S.composerBox}>
           <textarea
@@ -549,6 +607,9 @@ const App: React.FC = () => {
   const [detailNotice, setDetailNotice] = useState('')
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiImage, setAiImage] = useState<any>(null)
+  const [aiSessionUuid, setAiSessionUuid] = useState('')
+  const [aiHistory, setAiHistory] = useState<any[]>([])
+  const [aiHistoryItems, setAiHistoryItems] = useState<any[]>([])
   const [aiDraft, setAiDraft] = useState<any>(null)
   const [aiMessages, setAiMessages] = useState<any[]>([])
   const [aiError, setAiError] = useState('')
@@ -570,16 +631,33 @@ const App: React.FC = () => {
     loadList()
   }, [])
 
-  async function saveAiSession(messages: any[], draft: any) {
+  function makeAiSessionUuid(): string {
+    return `ai_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  }
+
+  function applyAiSessionResponse(data: any) {
+    setAiHistory(Array.isArray(data?.sessions) ? data.sessions : [])
+    setAiHistoryItems(Array.isArray(data?.session_items) ? data.session_items : [])
+  }
+
+  async function saveAiSession(messages: any[], draft: any, sessionUuid = aiSessionUuid) {
     if (!currentUuid) return
+    if (!sessionUuid && messages.length === 0 && !draft) return
     try {
-      await apiPost(`/bi/dashboard/${currentUuid}/ai/session`, { messages, draft })
+      const res = await apiPost(`/bi/dashboard/${currentUuid}/ai/session`, {
+        session_uuid: sessionUuid || makeAiSessionUuid(),
+        messages,
+        draft,
+      })
+      applyAiSessionResponse(res.data || {})
     } catch {
       /* 会话保存失败不阻塞主流程 */
     }
   }
 
   async function openAiReport() {
+    const sessionUuid = makeAiSessionUuid()
+    setAiSessionUuid(sessionUuid)
     setAiPrompt('')
     setAiImage(null)
     setAiDraft(null)
@@ -589,21 +667,31 @@ const App: React.FC = () => {
     if (!currentUuid) return
     try {
       const res = await apiGet(`/bi/dashboard/${currentUuid}/ai/session`)
-      const session = res.data || {}
-      setAiMessages(Array.isArray(session.messages) ? session.messages : [])
-      setAiDraft(session.draft || null)
+      applyAiSessionResponse(res.data || {})
     } catch (e: any) {
       setAiError(e.message || '加载历史对话失败')
     }
   }
 
   async function handleResetAiSession() {
+    const sessionUuid = makeAiSessionUuid()
+    setAiSessionUuid(sessionUuid)
     setAiDraft(null)
     setAiMessages([])
     setAiPrompt('')
     setAiImage(null)
     setAiError('')
-    await saveAiSession([], null)
+  }
+
+  function handleSelectAiSession(sessionUuid: string) {
+    const session = aiHistoryItems.find((item: any) => item.session_uuid === sessionUuid)
+    if (!session) return
+    setAiSessionUuid(session.session_uuid)
+    setAiMessages(Array.isArray(session.messages) ? session.messages : [])
+    setAiDraft(session.draft || null)
+    setAiPrompt('')
+    setAiImage(null)
+    setAiError('')
   }
 
   async function handleCreate() {
@@ -734,7 +822,6 @@ const App: React.FC = () => {
       setAiPrompt('')
       setAiImage(null)
       setAiError('')
-      await saveAiSession([], null)
       setDetailNotice(`已新增 ${count} 张 AI 报表卡片`)
       setDetailReloadToken((value) => value + 1)
     } catch (e: any) {
@@ -761,6 +848,8 @@ const App: React.FC = () => {
           <div style={S.modalOverlay} onClick={() => setShowAiReport(false)}>
             <div style={S.wideModal} onClick={(e) => e.stopPropagation()}>
               <AiReportDialogContent
+                aiSessionUuid={aiSessionUuid}
+                aiHistory={aiHistory}
                 aiBusy={aiBusy}
                 aiDraft={aiDraft}
                 aiImage={aiImage}
@@ -777,6 +866,7 @@ const App: React.FC = () => {
                 handleResetAiSession={handleResetAiSession}
                 handlePickImage={handlePickImage}
                 handlePasteImage={handlePasteImage}
+                handleSelectAiSession={handleSelectAiSession}
                 onCancel={() => setShowAiReport(false)}
               />
             </div>
