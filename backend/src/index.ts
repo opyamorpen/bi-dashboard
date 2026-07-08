@@ -3,14 +3,34 @@ import { storage } from '@ones-op/sdk/node'
 import type { PluginResponse } from '@ones-op/node-types'
 import { FetchAsAdmin, OPFetch } from '@ones-op/fetch'
 
+declare const require: any
+declare const Buffer: any
+declare const URL: any
+
 // ============================================================
 // 实体引用
 // ============================================================
 const dashboardEntity = storage.entity('bi_dashboard')
 const datasetEntity = storage.entity('bi_dataset')
 const auditLog = storage.entity('bi_audit_log')
+const appConfigEntity = storage.entity('bi_app_config')
+const reportSnapshotEntity = storage.entity('bi_report_snapshot')
 
 const DEFAULT_DATASET_UUID = 'default_issue_dataset'
+const AI_CONFIG_KEY = 'ai'
+const SUPPORTED_CHART_TYPES = new Set(['number', 'bar', 'pie', 'donut', 'table'])
+const SUPPORTED_FIELDS = new Set([
+  'uuid',
+  'title',
+  'issue_type',
+  'status',
+  'assignee',
+  'priority',
+  'project_uuid',
+  'created_at',
+])
+const SUPPORTED_FILTER_OPERATORS = new Set(['eq', 'neq', 'in', 'not_in', 'contains', 'empty', 'not_empty'])
+const SUPPORTED_AGGREGATIONS = new Set(['count', 'count_distinct'])
 const DEFAULT_ISSUE_FIELDS = [
   { key: 'uuid', label: '工作项UUID', type: 'text', dimension: false, metric: false },
   { key: 'title', label: '标题', type: 'text', dimension: true, metric: false },
@@ -117,6 +137,45 @@ function makeUuid(): string {
   return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
 }
 
+function makeSafeKey(input: string): string {
+  return String(input || '')
+    .replace(/[^A-Za-z0-9_]/g, '_')
+    .slice(0, 64)
+}
+
+function getAiConfigKey(teamUUID: string): string {
+  return makeSafeKey(`team_${teamUUID}_${AI_CONFIG_KEY}`)
+}
+
+function getSnapshotKey(dashboardUUID: string, cardUUID: string): string {
+  return makeSafeKey(`snap_${dashboardUUID}_${cardUUID}`)
+}
+
+function safeJsonParse(raw: any, fallback: any) {
+  if (!raw || typeof raw !== 'string') return fallback
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return fallback
+  }
+}
+
+function jsonText(value: any, max = 32768, fallback: any = {}): string {
+  const write = (v: any) => JSON.stringify(v ?? fallback)
+  let text = write(value)
+  if (text.length <= max) return text
+  if (value?.rows && Array.isArray(value.rows)) {
+    const compact = { ...value, rows: value.rows.slice(0, 100), truncated: true }
+    text = write(compact)
+    if (text.length <= max) return text
+  }
+  if (Array.isArray(value)) {
+    text = write(value.slice(0, 100))
+    if (text.length <= max) return text
+  }
+  return write(fallback)
+}
+
 function getOperator(req: any): string {
   if (!req?.headers) return ''
   const h = req.headers
@@ -186,6 +245,163 @@ async function writeAudit(
   }
 }
 
+function normalizeBaseUrl(baseUrl: string): string {
+  const trimmed = String(baseUrl || '').trim().replace(/\/+$/, '')
+  if (!trimmed) return ''
+  return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`
+}
+
+function requestJson(urlText: string, apiKey: string, body: any): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlText)
+    const mod = require(url.protocol === 'http:' ? 'http' : 'https')
+    const payload = JSON.stringify(body)
+    const req = mod.request(
+      {
+        method: 'POST',
+        hostname: url.hostname,
+        port: url.port || undefined,
+        path: `${url.pathname}${url.search}`,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (res: any) => {
+        const chunks: any[] = []
+        res.on('data', (chunk: any) => chunks.push(chunk))
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8')
+          let json: any = null
+          try {
+            json = text ? JSON.parse(text) : {}
+          } catch {
+            reject(new Error(`AI 服务返回非 JSON: ${text.slice(0, 500)}`))
+            return
+          }
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            reject(new Error(`AI 服务 HTTP ${res.statusCode}: ${text.slice(0, 1000)}`))
+            return
+          }
+          resolve(json)
+        })
+      },
+    )
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
+function extractJsonObject(text: string): any {
+  const raw = String(text || '').trim()
+  if (!raw) throw new Error('AI 返回为空')
+  try {
+    return JSON.parse(raw)
+  } catch {
+    const start = raw.indexOf('{')
+    const end = raw.lastIndexOf('}')
+    if (start >= 0 && end > start) return JSON.parse(raw.slice(start, end + 1))
+    throw new Error(`AI 返回不是合法 JSON: ${raw.slice(0, 300)}`)
+  }
+}
+
+function sanitizeFilter(filter: any): any | null {
+  const fieldKey = String(filter?.field_key || '')
+  const operator = String(filter?.operator || '')
+  if (!SUPPORTED_FIELDS.has(fieldKey) || !SUPPORTED_FILTER_OPERATORS.has(operator)) return null
+  return { field_key: fieldKey, operator, value: filter?.value ?? '' }
+}
+
+function sanitizeLayout(layout: any, index: number, chartType: string): any {
+  const defaultH = chartType === 'number' ? 4 : chartType === 'table' || chartType === 'bar' ? 8 : 6
+  return {
+    x: Math.max(0, Math.round(Number(layout?.x) || (index % 2) * 9)),
+    y: Math.max(0, Math.round(Number(layout?.y) || Math.floor(index / 2) * 9)),
+    w: Math.max(4, Math.min(18, Math.round(Number(layout?.w) || 8))),
+    h: Math.max(3, Math.min(16, Math.round(Number(layout?.h) || defaultH))),
+    grid_size: 48,
+  }
+}
+
+function sanitizeReportDraft(input: any): any {
+  const source = input?.draft && typeof input.draft === 'object' ? input.draft : input
+  const title = String(source?.title || '未命名固定报表').slice(0, 120)
+  const filters = Array.isArray(source?.filters)
+    ? source.filters.map(sanitizeFilter).filter(Boolean).slice(0, 20)
+    : []
+
+  const rawCards = Array.isArray(source?.cards) ? source.cards.slice(0, 24) : []
+  const cards = rawCards.map((card: any, index: number) => {
+    const chartType = SUPPORTED_CHART_TYPES.has(String(card?.chart_type))
+      ? String(card.chart_type)
+      : 'number'
+    const metric = card?.metric || {}
+    const aggregation = SUPPORTED_AGGREGATIONS.has(String(metric.aggregation))
+      ? String(metric.aggregation)
+      : 'count'
+    const metricField = SUPPORTED_FIELDS.has(String(metric.field_key)) ? String(metric.field_key) : 'uuid'
+    const dimension =
+      card?.dimension && SUPPORTED_FIELDS.has(String(card.dimension.field_key))
+        ? {
+            field_key: String(card.dimension.field_key),
+            name: String(card.dimension.name || card.dimension.field_key).slice(0, 64),
+          }
+        : undefined
+    return {
+      title: String(card?.title || `卡片 ${index + 1}`).slice(0, 120),
+      chart_type: chartType,
+      metric: {
+        name: String(metric.name || 'count').slice(0, 64),
+        aggregation,
+        field_key: metricField,
+      },
+      dimension,
+      limit: Math.max(1, Math.min(1000, Number(card?.limit) || (chartType === 'table' ? 50 : 15))),
+      layout: sanitizeLayout(card?.layout, index, chartType),
+    }
+  })
+
+  if (cards.length === 0) {
+    cards.push({
+      title: '工作项总数',
+      chart_type: 'number',
+      metric: { name: 'count', aggregation: 'count', field_key: 'uuid' },
+      limit: 100,
+      layout: sanitizeLayout(null, 0, 'number'),
+    })
+  }
+
+  return {
+    title,
+    description: String(source?.description || '').slice(0, 1000),
+    data_scope: source?.data_scope && typeof source.data_scope === 'object' ? source.data_scope : {},
+    filters,
+    cards,
+  }
+}
+
+function draftCardToStoredCard(card: any, index: number, filters: any[] = []): any {
+  const dimension = card.dimension ? [{ field_key: card.dimension.field_key, name: card.dimension.name || card.dimension.field_key }] : []
+  const metricName = card.metric?.name || 'count'
+  return {
+    card_uuid: makeUuid(),
+    title: card.title || `卡片 ${index + 1}`,
+    chart_type: card.chart_type || 'number',
+    dataset_uuid: DEFAULT_DATASET_UUID,
+    query_json: JSON.stringify({
+      metrics: [{ name: metricName, aggregation: card.metric?.aggregation || 'count', field_key: card.metric?.field_key || 'uuid' }],
+      dimensions: card.chart_type === 'number' ? [] : dimension,
+      filters,
+      sort: [],
+      limit: card.limit || 100,
+    }),
+    style_json: '{}',
+    layout: sanitizeLayout(card.layout, index, card.chart_type || 'number'),
+  }
+}
+
 // ============================================================
 // 生命周期
 // ============================================================
@@ -200,11 +416,216 @@ export function UnInstall() {
 }
 
 export async function Enable() {
-  Logger.info('[BI] Enable — v0.4.22 separates dashboard view and edit layout modes')
+  Logger.info('[BI] Enable — v0.5.0 fixed report center with AI drafts and snapshots')
 }
 
 export function Upgrade(oldVersion: any) {
   Logger.info('[BI] Upgrade from:', JSON.stringify(oldVersion))
+}
+
+// ============================================================
+// AI 配置、草稿与快照
+// ============================================================
+
+export async function getAiConfig(req: any): Promise<PluginResponse> {
+  const teamUUID = getParam(req, 'teamUUID')
+  const row = (await appConfigEntity.get(getAiConfigKey(teamUUID))) as any
+  const config = safeJsonParse(row?.config_json, {})
+  return {
+    body: {
+      data: {
+        base_url: config.base_url || '',
+        model: config.model || '',
+        supports_vision: Boolean(config.supports_vision),
+        has_api_key: Boolean(config.api_key),
+        updated_at: row?.updated_at || 0,
+      },
+    },
+  }
+}
+
+export async function saveAiConfig(req: any): Promise<PluginResponse> {
+  const teamUUID = getParam(req, 'teamUUID')
+  const operator = getOperator(req)
+  const b = (req.body || {}) as any
+  const existing = (await appConfigEntity.get(getAiConfigKey(teamUUID))) as any
+  const existingConfig = safeJsonParse(existing?.config_json, {})
+  const nextConfig = {
+    base_url: String(b.base_url || '').trim(),
+    model: String(b.model || '').trim(),
+    supports_vision: Boolean(b.supports_vision),
+    api_key:
+      b.api_key === undefined || b.api_key === null || b.api_key === ''
+        ? existingConfig.api_key || ''
+        : String(b.api_key),
+  }
+  if (!nextConfig.base_url || !nextConfig.model) {
+    return { body: { error: '缺少 AI 服务地址或模型名称' }, statusCode: 400 }
+  }
+  const now = Date.now()
+  await appConfigEntity.set(
+    getAiConfigKey(teamUUID),
+    cleanForSet({
+      config_key: AI_CONFIG_KEY,
+      team_uuid: teamUUID,
+      config_json: jsonText(nextConfig),
+      updated_by: operator,
+      updated_at: now,
+    }),
+  )
+  await writeAudit(teamUUID, 'config', AI_CONFIG_KEY, '保存AI配置', operator, {
+    base_url: nextConfig.base_url,
+    model: nextConfig.model,
+    supports_vision: nextConfig.supports_vision,
+  })
+  return { body: { data: { ok: true, has_api_key: Boolean(nextConfig.api_key), updated_at: now } } }
+}
+
+export async function generateReportDraft(req: any): Promise<PluginResponse> {
+  const teamUUID = getParam(req, 'teamUUID')
+  const b = (req.body || {}) as any
+  const prompt = String(b.prompt || '').trim()
+  if (!prompt) return { body: { error: '请输入报表需求描述' }, statusCode: 400 }
+
+  const row = (await appConfigEntity.get(getAiConfigKey(teamUUID))) as any
+  const config = safeJsonParse(row?.config_json, {})
+  if (!config.base_url || !config.model || !config.api_key) {
+    return { body: { error: 'AI 服务未配置，请先填写 base_url、model 和 api_key' }, statusCode: 400 }
+  }
+  if (b.image?.data_url && !config.supports_vision) {
+    return { body: { error: '当前 AI 配置未启用图片输入' }, statusCode: 400 }
+  }
+
+  const systemPrompt = [
+    '你是 ONES 固定报表配置助手。',
+    '你只能返回严格 JSON，不要返回 Markdown，不要解释。',
+    '不要生成 SQL、ONESQL 或 JavaScript。',
+    '字段只能使用: uuid,title,issue_type,status,assignee,priority,project_uuid,created_at。',
+    'chart_type 只能使用: number,bar,pie,donut,table。',
+    'aggregation 只能使用: count,count_distinct。',
+    '返回结构必须是 {title,description,data_scope,filters,cards}。',
+  ].join('\n')
+  const content: any[] = [
+    {
+      type: 'text',
+      text: `${systemPrompt}\n\n用户报表需求：\n${prompt}`,
+    },
+  ]
+  if (b.image?.data_url) {
+    content.push({ type: 'image_url', image_url: { url: b.image.data_url } })
+  }
+
+  try {
+    const json = await requestJson(`${normalizeBaseUrl(config.base_url)}/chat/completions`, config.api_key, {
+      model: config.model,
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content },
+      ],
+    })
+    const text = json?.choices?.[0]?.message?.content || ''
+    const draft = sanitizeReportDraft(extractJsonObject(text))
+    return { body: { data: { draft } } }
+  } catch (e: any) {
+    Logger.error('[BI] generateReportDraft failed:', e?.message || e)
+    return { body: { error: e?.message || 'AI 草稿生成失败' }, statusCode: 500 }
+  }
+}
+
+export async function createReportFromDraft(req: any): Promise<PluginResponse> {
+  const teamUUID = getParam(req, 'teamUUID')
+  const operator = getOperator(req)
+  const b = (req.body || {}) as any
+  const draft = sanitizeReportDraft(b.draft || b)
+  const uuid = makeUuid()
+  const now = Date.now()
+  const cards = draft.cards.map((card: any, index: number) => draftCardToStoredCard(card, index, draft.filters || []))
+  const config = {
+    layout: 'grid',
+    report_mode: 'fixed',
+    source: 'ai_draft',
+    snapshot_policy: 'manual',
+    description: draft.description || '',
+    data_scope: draft.data_scope || {},
+    filters: draft.filters || [],
+    draft_json: draft,
+  }
+  await dashboardEntity.set(
+    uuid,
+    cleanForSet({
+      dashboard_uuid: uuid,
+      team_uuid: teamUUID,
+      name: draft.title,
+      owner_uuid: operator,
+      status: 'active',
+      config_json: jsonText(config),
+      cards_json: jsonText(cards),
+      created_by: operator,
+      created_at: now,
+      updated_at: now,
+    }),
+  )
+  await writeAudit(teamUUID, 'dashboard', uuid, '从AI草稿创建固定报表', operator, {
+    name: draft.title,
+    card_count: cards.length,
+  })
+  return { body: { data: { dashboard_uuid: uuid, name: draft.title, card_count: cards.length } } }
+}
+
+export async function listDashboardSnapshots(req: any): Promise<PluginResponse> {
+  const teamUUID = getParam(req, 'teamUUID')
+  const dashboardUuid = getParam(req, 'dashboardUUID')
+  const all = await qAll(
+    reportSnapshotEntity,
+    (v: any) => v.team_uuid === teamUUID && v.dashboard_uuid === dashboardUuid,
+  )
+  const snapshots: Record<string, any> = {}
+  for (const row of all) {
+    const current = snapshots[row.card_uuid]
+    if (current && Number(current.created_at || 0) > Number(row.created_at || 0)) continue
+    snapshots[row.card_uuid] = {
+      snapshot_uuid: row.snapshot_uuid,
+      card_uuid: row.card_uuid,
+      status: row.status,
+      data: safeJsonParse(row.data_json, null),
+      error: row.error || '',
+      created_at: row.created_at || 0,
+    }
+  }
+  return { body: { data: { snapshots } } }
+}
+
+export async function saveDashboardSnapshots(req: any): Promise<PluginResponse> {
+  const teamUUID = getParam(req, 'teamUUID')
+  const dashboardUuid = getParam(req, 'dashboardUUID')
+  const operator = getOperator(req)
+  const b = (req.body || {}) as any
+  const snapshots = Array.isArray(b.snapshots) ? b.snapshots.slice(0, 100) : []
+  const now = Date.now()
+  for (const item of snapshots) {
+    const cardUuid = String(item.card_uuid || '')
+    if (!cardUuid) continue
+    const key = getSnapshotKey(dashboardUuid, cardUuid)
+    await reportSnapshotEntity.set(
+      key,
+      cleanForSet({
+        snapshot_uuid: key,
+        team_uuid: teamUUID,
+        dashboard_uuid: dashboardUuid,
+        card_uuid: cardUuid,
+        status: item.status === 'failed' ? 'failed' : 'success',
+        data_json: jsonText(item.data ?? {}),
+        error: String(item.error || '').slice(0, 4096),
+        created_by: operator,
+        created_at: now,
+      }),
+    )
+  }
+  await writeAudit(teamUUID, 'snapshot', dashboardUuid, '刷新报表快照', operator, {
+    count: snapshots.length,
+  })
+  return { body: { data: { ok: true, count: snapshots.length, updated_at: now } } }
 }
 
 // ============================================================

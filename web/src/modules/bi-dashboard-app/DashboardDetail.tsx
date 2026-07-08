@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { apiGet, apiPost, apiDelete } from '../../api'
-import { ChartCard } from './ChartCard'
+import { ChartCard, queryBrowserWorkitemsOnesql } from './ChartCard'
 import { AddCardModal } from './AddCardModal'
 
 const GRID_SIZE = 48
@@ -65,14 +65,26 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
   const [showAddCard, setShowAddCard] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [localLayouts, setLocalLayouts] = useState<Record<string, any>>({})
+  const [snapshots, setSnapshots] = useState<Record<string, any>>({})
+  const [refreshingSnapshot, setRefreshingSnapshot] = useState(false)
+
+  const loadSnapshots = useCallback(async () => {
+    try {
+      const res = await apiGet(`/bi/dashboard/${dashboardUuid}/snapshots`)
+      setSnapshots(res.data?.snapshots || {})
+    } catch (e: any) {
+      setMsg(e.message || '加载快照失败')
+    }
+  }, [dashboardUuid])
 
   const loadDetail = useCallback(async () => {
     try {
       const res = await apiGet(`/bi/dashboard/${dashboardUuid}`)
       setDashboard(res.data)
+      await loadSnapshots()
     } catch (e: any) { setMsg(e.message) }
     finally { setLoading(false) }
-  }, [dashboardUuid])
+  }, [dashboardUuid, loadSnapshots])
 
   useEffect(() => { loadDetail() }, [loadDetail])
 
@@ -322,6 +334,38 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
     } catch (e: any) { setMsg(e.message) }
   }
 
+  async function handleRefreshSnapshot() {
+    if (cards.length === 0) return
+    setRefreshingSnapshot(true)
+    setMsg('')
+    const nextSnapshots: any[] = []
+    for (const card of cards) {
+      try {
+        const query = JSON.parse(card.query_json || '{}')
+        if (card.dataset_uuid !== 'default_issue_dataset') {
+          throw new Error('首期快照刷新仅支持默认工作项数据集')
+        }
+        const data = await queryBrowserWorkitemsOnesql(card.chart_type, query)
+        nextSnapshots.push({ card_uuid: card.card_uuid, status: 'success', data })
+      } catch (e: any) {
+        nextSnapshots.push({
+          card_uuid: card.card_uuid,
+          status: 'failed',
+          data: { rows: [] },
+          error: e.message || '刷新失败',
+        })
+      }
+    }
+    try {
+      await apiPost(`/bi/dashboard/${dashboardUuid}/snapshots`, { snapshots: nextSnapshots })
+      await loadSnapshots()
+    } catch (e: any) {
+      setMsg(e.message || '保存快照失败')
+    } finally {
+      setRefreshingSnapshot(false)
+    }
+  }
+
   if (loading) return <div style={S.empty}>加载中...</div>
 
   return (
@@ -330,9 +374,12 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
         <button style={S.btn(false)} onClick={onBack}>← 返回</button>
         <h1 style={S.title}>{dashboard?.name || '仪表盘'}</h1>
         {isEditing && <button style={S.btn(true)} onClick={() => setShowAddCard(true)}>+ 添加卡片</button>}
-        <button style={S.btn(false)} onClick={() => loadDetail()}>刷新</button>
+        <button style={S.btn(false)} onClick={handleRefreshSnapshot} disabled={refreshingSnapshot}>
+          {refreshingSnapshot ? '刷新快照中...' : '刷新快照'}
+        </button>
+        <button style={S.btn(false)} onClick={() => loadDetail()}>重新加载</button>
         <button style={S.btn(isEditing)} onClick={isEditing ? exitEditing : enterEditing}>
-          {isEditing ? '完成编辑' : '编辑仪表盘'}
+          {isEditing ? '完成编辑' : '高级编辑'}
         </button>
       </div>
       <div style={S.content}>
@@ -368,6 +415,9 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
                       card={card}
                       dashboardUuid={dashboardUuid}
                       editable={isEditing}
+                      snapshotData={snapshots[card.card_uuid]?.data}
+                      snapshotStatus={snapshots[card.card_uuid]?.status}
+                      snapshotError={snapshots[card.card_uuid]?.error}
                       onDelete={() => handleDeleteCard(card.card_uuid)}
                       onCopy={() => handleCopyCard(card)}
                       onDragStart={isEditing ? (e) => startDrag(card, index, e) : undefined}

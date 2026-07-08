@@ -49,4 +49,28 @@ declare var ONESEntities: {
         };
         indexes: null;
     };
+    bi_app_config: {
+        attributes: {
+            config_key?: string;
+            team_uuid?: string;
+            config_json?: string;
+            updated_by?: string;
+            updated_at?: number;
+        };
+        indexes: null;
+    };
+    bi_report_snapshot: {
+        attributes: {
+            snapshot_uuid?: string;
+            team_uuid?: string;
+            dashboard_uuid?: string;
+            card_uuid?: string;
+            status?: string;
+            data_json?: string;
+            error?: string;
+            created_by?: string;
+            created_at?: number;
+        };
+        indexes: null;
+    };
 };

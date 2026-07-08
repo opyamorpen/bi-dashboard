@@ -66,6 +66,9 @@ interface Props {
   card: any
   dashboardUuid: string
   editable?: boolean
+  snapshotData?: any
+  snapshotStatus?: string
+  snapshotError?: string
   onDelete: () => void
   onCopy: () => void
   onDragStart?: (e: React.MouseEvent) => void
@@ -436,7 +439,7 @@ async function queryIssueTypeCounts(whereClause: string, metricName: string, out
   return data
 }
 
-async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promise<any> {
+export async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promise<any> {
   const startedAt = Date.now()
   const metricName = query.metrics?.[0]?.name || 'count'
   const detailLimit = Math.min(Math.max(query.limit || 100, 1), 1000)
@@ -502,7 +505,17 @@ async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promi
   }
 }
 
-export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, editable = false, onDelete, onCopy, onDragStart }) => {
+export const ChartCard: React.FC<Props> = ({
+  card,
+  dashboardUuid,
+  editable = false,
+  snapshotData,
+  snapshotStatus,
+  snapshotError,
+  onDelete,
+  onCopy,
+  onDragStart,
+}) => {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -510,6 +523,24 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, editable = fal
   const query = useMemo(() => JSON.parse(card.query_json || '{}'), [card.query_json])
 
   const loadData = useCallback(async () => {
+    if (!editable && snapshotStatus === 'success') {
+      setData(snapshotData || null)
+      setError('')
+      setLoading(false)
+      return
+    }
+    if (!editable && snapshotStatus === 'failed') {
+      setData(null)
+      setError(snapshotError || '快照刷新失败')
+      setLoading(false)
+      return
+    }
+    if (!editable && snapshotStatus !== 'success') {
+      setData(null)
+      setError('')
+      setLoading(false)
+      return
+    }
     if (!card.dataset_uuid) {
       setData(null)
       setError('卡片缺少数据集，请重新创建或编辑卡片')
@@ -555,13 +586,14 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, editable = fal
     } finally {
       setLoading(false)
     }
-  }, [card.chart_type, card.dataset_uuid, query])
+  }, [card.chart_type, card.dataset_uuid, editable, query, snapshotData, snapshotError, snapshotStatus])
 
   useEffect(() => { loadData() }, [card.card_uuid, loadData])
 
   function renderChart() {
     if (loading) return <div style={S.loading}>加载中...</div>
     if (error) return <div style={S.error}>{error}<button style={S.retryBtn} onClick={loadData}>重试</button></div>
+    if (!editable && snapshotStatus !== 'success') return <div style={S.empty}>尚未刷新</div>
     if (!data?.rows || data.rows.length === 0) return <div style={S.empty}>暂无数据</div>
 
     const rows = data.rows

@@ -1,8 +1,8 @@
 service:
   app_id: 8SHK4cQv
   name: BI仪表盘
-  description: 团队级BI数据分析插件。支持自定义仪表盘、数据集、图表卡片、下钻明细和权限控制。
-  version: 0.4.22
+  description: 团队级固定报表中心。支持 AI 生成报表草稿、固定报表、快照刷新和高级编辑。
+  version: 0.5.0
   mode: org
   logo: null
   language: nodejs
@@ -132,6 +132,36 @@ apis:
       - GET
     url: /team/:teamUUID/bi/users/me
     function: getCurrentUser
+  - type: external
+    methods:
+      - GET
+    url: /team/:teamUUID/bi/ai/config
+    function: getAiConfig
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/bi/ai/config
+    function: saveAiConfig
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/bi/ai/report-draft
+    function: generateReportDraft
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/bi/report/from-draft
+    function: createReportFromDraft
+  - type: external
+    methods:
+      - GET
+    url: /team/:teamUUID/bi/dashboard/:dashboardUUID/snapshots
+    function: listDashboardSnapshots
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/bi/dashboard/:dashboardUUID/snapshots
+    function: saveDashboardSnapshots
 storage:
   entities:
     - name: bi_dashboard
@@ -252,6 +282,66 @@ storage:
           type: text
           length: 4096
           default: '{}'
+        created_at:
+          type: integer
+          length: 16
+          default: 0
+    - name: bi_app_config
+      attributes:
+        config_key:
+          type: text
+          length: 128
+          default: ''
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        config_json:
+          type: text
+          length: 32768
+          default: '{}'
+        updated_by:
+          type: text
+          length: 64
+          default: ''
+        updated_at:
+          type: integer
+          length: 16
+          default: 0
+    - name: bi_report_snapshot
+      attributes:
+        snapshot_uuid:
+          type: text
+          length: 128
+          default: ''
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        dashboard_uuid:
+          type: text
+          length: 64
+          default: ''
+        card_uuid:
+          type: text
+          length: 64
+          default: ''
+        status:
+          type: text
+          length: 32
+          default: ''
+        data_json:
+          type: text
+          length: 32768
+          default: '{}'
+        error:
+          type: text
+          length: 4096
+          default: ''
+        created_by:
+          type: text
+          length: 64
+          default: ''
         created_at:
           type: integer
           length: 16
