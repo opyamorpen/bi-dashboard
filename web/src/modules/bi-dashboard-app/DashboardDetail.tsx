@@ -3,8 +3,7 @@ import { apiGet, apiPost, apiDelete } from '../../api'
 import { ChartCard } from './ChartCard'
 import { AddCardModal } from './AddCardModal'
 
-const GRID_SIZE = 24
-const CARD_INSET = 8
+const GRID_SIZE = 48
 const DEFAULT_CANVAS_WIDTH = 980
 const DEFAULT_CANVAS_HEIGHT = 560
 
@@ -24,12 +23,13 @@ const S: any = {
   cardFrame: { position: 'absolute' as any, boxSizing: 'border-box' as any },
   resizeHandle: {
     position: 'absolute' as any,
-    right: 4,
-    bottom: 4,
-    width: 14,
-    height: 14,
+    right: 8,
+    bottom: 8,
+    width: 16,
+    height: 16,
     borderRight: '2px solid #8aa4c8',
     borderBottom: '2px solid #8aa4c8',
+    borderRadius: 2,
     cursor: 'nwse-resize',
     zIndex: 2,
   },
@@ -71,26 +71,36 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
   const cards: any[] = dashboard ? JSON.parse(dashboard.cards_json || '[]') : []
 
   function getDefaultLayout(card: any, index: number): any {
-    const w = 16
-    const h = card.chart_type === 'number' ? 9 : card.chart_type === 'bar' || card.chart_type === 'table' ? 16 : 12
+    const w = 8
+    const h = card.chart_type === 'number' ? 4 : card.chart_type === 'bar' || card.chart_type === 'table' ? 8 : 6
     return {
-      x: (index % 2) * 17,
-      y: Math.floor(index / 2) * 17,
+      x: (index % 2) * 9,
+      y: Math.floor(index / 2) * 9,
       w,
       h,
+      grid_size: GRID_SIZE,
     }
   }
 
   function normalizeLayout(card: any, index: number): any {
     const layout = card.layout || {}
-    const w = Number(layout.w) || 0
-    const h = Number(layout.h) || 0
-    if (w < 10 || h < 7) return getDefaultLayout(card, index)
+    let x = Number(layout.x) || 0
+    let y = Number(layout.y) || 0
+    let w = Number(layout.w) || 0
+    let h = Number(layout.h) || 0
+    if (layout.grid_size !== GRID_SIZE && (w >= 10 || h >= 9 || x >= 10 || y >= 10)) {
+      x = Math.round(x / 2)
+      y = Math.round(y / 2)
+      w = Math.round(w / 2)
+      h = Math.round(h / 2)
+    }
+    if (w < 4 || h < 3) return getDefaultLayout(card, index)
     return {
-      x: Math.max(0, Math.round(Number(layout.x) || 0)),
-      y: Math.max(0, Math.round(Number(layout.y) || 0)),
-      w: Math.max(10, Math.round(w)),
-      h: Math.max(7, Math.round(h)),
+      x: Math.max(0, Math.round(x)),
+      y: Math.max(0, Math.round(y)),
+      w: Math.max(4, Math.round(w)),
+      h: Math.max(3, Math.round(h)),
+      grid_size: GRID_SIZE,
     }
   }
 
@@ -107,6 +117,61 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
     return localLayouts[card.card_uuid] || normalizeLayout(card, index)
   }
 
+  function intersects(a: any, b: any): boolean {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+  }
+
+  function normalizeResolvedLayout(layout: any): any {
+    return {
+      ...layout,
+      x: Math.max(0, Math.round(layout.x || 0)),
+      y: Math.max(0, Math.round(layout.y || 0)),
+      w: Math.max(4, Math.round(layout.w || 4)),
+      h: Math.max(3, Math.round(layout.h || 3)),
+      grid_size: GRID_SIZE,
+    }
+  }
+
+  function resolveLayoutCollisions(layouts: Record<string, any>, activeUuid: string): Record<string, any> {
+    const next: Record<string, any> = {}
+    for (const [uuid, layout] of Object.entries(layouts)) next[uuid] = normalizeResolvedLayout(layout)
+
+    const order = cards
+      .map((card: any) => card.card_uuid)
+      .filter((uuid: string) => uuid !== activeUuid)
+      .sort((a: string, b: string) => {
+        const la = next[a] || {}
+        const lb = next[b] || {}
+        return (la.y - lb.y) || (la.x - lb.x)
+      })
+
+    const placed = [activeUuid]
+    for (const uuid of order) {
+      let layout = { ...next[uuid] }
+      let moved = true
+      while (moved) {
+        moved = false
+        for (const placedUuid of placed) {
+          const blocker = next[placedUuid]
+          if (!blocker || !intersects(layout, blocker)) continue
+          layout = { ...layout, y: blocker.y + blocker.h }
+          moved = true
+        }
+      }
+      next[uuid] = normalizeResolvedLayout(layout)
+      placed.push(uuid)
+    }
+    return next
+  }
+
+  function getAllLayouts(): Record<string, any> {
+    const layouts: Record<string, any> = {}
+    cards.forEach((card: any, index: number) => {
+      layouts[card.card_uuid] = getCardLayout(card, index)
+    })
+    return layouts
+  }
+
   function getNextCardY(): number {
     return cards.reduce((bottom: number, card: any, index: number) => {
       const layout = getCardLayout(card, index)
@@ -114,16 +179,16 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
     }, 0) + 1
   }
 
-  async function saveCardLayout(card: any, layout: any) {
+  async function saveResolvedLayouts(layouts: Record<string, any>) {
     try {
-      await apiPost(`/bi/dashboard/${dashboardUuid}/card/${card.card_uuid}`, { layout })
+      await Promise.all(
+        cards.map((card: any) => apiPost(`/bi/dashboard/${dashboardUuid}/card/${card.card_uuid}`, {
+          layout: layouts[card.card_uuid],
+        })),
+      )
     } catch (e: any) {
       setMsg(e.message || '保存卡片布局失败')
     }
-  }
-
-  function updateLocalLayout(cardUuid: string, layout: any) {
-    setLocalLayouts((prev) => ({ ...prev, [cardUuid]: layout }))
   }
 
   function startDrag(card: any, index: number, e: React.MouseEvent) {
@@ -132,7 +197,7 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
     const base = getCardLayout(card, index)
     const startX = e.clientX
     const startY = e.clientY
-    let latest = base
+    let latest = getAllLayouts()
     const previousUserSelect = document.body.style.userSelect
     document.body.style.userSelect = 'none'
 
@@ -142,14 +207,15 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
         x: Math.max(0, base.x + Math.round((event.clientX - startX) / GRID_SIZE)),
         y: Math.max(0, base.y + Math.round((event.clientY - startY) / GRID_SIZE)),
       }
-      latest = next
-      updateLocalLayout(card.card_uuid, next)
+      const resolved = resolveLayoutCollisions({ ...getAllLayouts(), [card.card_uuid]: next }, card.card_uuid)
+      latest = resolved
+      setLocalLayouts(resolved)
     }
     const onUp = () => {
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
       document.body.style.userSelect = previousUserSelect
-      saveCardLayout(card, latest)
+      saveResolvedLayouts(latest)
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
@@ -162,25 +228,26 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
     const base = getCardLayout(card, index)
     const startX = e.clientX
     const startY = e.clientY
-    const minH = card.chart_type === 'number' ? 7 : 9
-    let latest = base
+    const minH = card.chart_type === 'number' ? 3 : 4
+    let latest = getAllLayouts()
     const previousUserSelect = document.body.style.userSelect
     document.body.style.userSelect = 'none'
 
     const onMove = (event: MouseEvent) => {
       const next = {
         ...base,
-        w: Math.max(10, base.w + Math.round((event.clientX - startX) / GRID_SIZE)),
+        w: Math.max(4, base.w + Math.round((event.clientX - startX) / GRID_SIZE)),
         h: Math.max(minH, base.h + Math.round((event.clientY - startY) / GRID_SIZE)),
       }
-      latest = next
-      updateLocalLayout(card.card_uuid, next)
+      const resolved = resolveLayoutCollisions({ ...getAllLayouts(), [card.card_uuid]: next }, card.card_uuid)
+      latest = resolved
+      setLocalLayouts(resolved)
     }
     const onUp = () => {
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
       document.body.style.userSelect = previousUserSelect
-      saveCardLayout(card, latest)
+      saveResolvedLayouts(latest)
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
@@ -273,8 +340,8 @@ export const DashboardDetail: React.FC<Props> = ({ dashboardUuid, onBack }) => {
                       ...S.cardFrame,
                       left: layout.x * GRID_SIZE,
                       top: layout.y * GRID_SIZE,
-                      width: layout.w * GRID_SIZE - CARD_INSET,
-                      height: layout.h * GRID_SIZE - CARD_INSET,
+                      width: layout.w * GRID_SIZE,
+                      height: layout.h * GRID_SIZE,
                     }}
                   >
                     <ChartCard

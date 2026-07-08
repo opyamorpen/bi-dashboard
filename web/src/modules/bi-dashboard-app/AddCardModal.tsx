@@ -74,9 +74,9 @@ function getDefaultLimit(chartType: string): number {
 }
 
 function getDefaultLayout(chartType: string): any {
-  if (chartType === 'number') return { x: 0, y: 0, w: 16, h: 9 }
-  if (chartType === 'bar' || chartType === 'table') return { x: 0, y: 0, w: 16, h: 16 }
-  return { x: 0, y: 0, w: 16, h: 12 }
+  if (chartType === 'number') return { x: 0, y: 0, w: 8, h: 4, grid_size: 48 }
+  if (chartType === 'bar' || chartType === 'table') return { x: 0, y: 0, w: 8, h: 8, grid_size: 48 }
+  return { x: 0, y: 0, w: 8, h: 6, grid_size: 48 }
 }
 
 function pickDefaultDimension(fields: any[]): string {

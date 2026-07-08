@@ -2,7 +2,18 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { apiPost, getTeamUUID } from '../../api'
 
 const S: any = {
-  card: { background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8', overflow: 'hidden', alignSelf: 'start', height: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' as any },
+  card: {
+    background: '#fff',
+    borderRadius: 12,
+    border: '1px solid #dce3ee',
+    boxShadow: '0 8px 22px rgba(15, 23, 42, 0.10), 0 1px 2px rgba(15, 23, 42, 0.06)',
+    overflow: 'hidden',
+    alignSelf: 'start',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    boxSizing: 'border-box' as any,
+  },
   cardHeader: { padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   cardHeaderDraggable: { cursor: 'move', userSelect: 'none' as any },
   cardTitle: { fontSize: 14, fontWeight: 600 },
@@ -11,7 +22,6 @@ const S: any = {
   cardBody: { padding: 16, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
   chartViewport: { flex: 1, minHeight: 0, overflowY: 'auto' as any, overflowX: 'hidden' as any, paddingRight: 4 },
   chartViewportCompact: { flex: 1, minHeight: 0, overflow: 'hidden' },
-  cardMeta: { marginTop: 12, paddingTop: 10, borderTop: '1px solid #f5f5f5', color: '#999', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' as any },
   loading: { textAlign: 'center', padding: 40, color: '#999', fontSize: 13 },
   error: { textAlign: 'center', padding: 40, color: '#ff4d4f', fontSize: 13 },
   retryBtn: { marginLeft: 8, border: 'none', background: 'transparent', cursor: 'pointer', color: '#1677ff', fontSize: 13, padding: 0 },
@@ -491,19 +501,10 @@ async function queryBrowserWorkitemsOnesql(chartType: string, query: any): Promi
   }
 }
 
-function getDataSourceLabel(provider?: string): string {
-  if (provider === 'onesql') return 'ONESQL'
-  if (provider === 'workitems_onesql') return 'ONESQL（全量真实数据）'
-  return '实时查询'
-}
-
 export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCopy, onDragStart }) => {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [lastUpdated, setLastUpdated] = useState('')
-  const [queryTimeMs, setQueryTimeMs] = useState<number | null>(null)
-  const [dataSource, setDataSource] = useState('实时查询')
 
   const query = useMemo(() => JSON.parse(card.query_json || '{}'), [card.query_json])
 
@@ -516,14 +517,10 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
     }
     setLoading(true)
     setError('')
-    const startedAt = Date.now()
     try {
       if (card.dataset_uuid === DEFAULT_DATASET_UUID) {
         const browserOnesqlData = await queryBrowserWorkitemsOnesql(card.chart_type, query)
         setData(browserOnesqlData)
-        setQueryTimeMs(browserOnesqlData.query_time_ms ?? Date.now() - startedAt)
-        setDataSource(getDataSourceLabel(browserOnesqlData.debug?.provider))
-        setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
         return
       }
 
@@ -537,22 +534,15 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
         limit: query.limit || 100,
       })
       setData(res.data)
-      setQueryTimeMs(res.data?.query_time_ms ?? Date.now() - startedAt)
-      setDataSource(getDataSourceLabel(res.data?.debug?.provider))
-      setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
     } catch (e: any) {
       try {
         if (card.dataset_uuid === DEFAULT_DATASET_UUID) {
           setData(null)
           setError(e.message || '查询失败')
-          setQueryTimeMs(Date.now() - startedAt)
           return
         }
         const browserOnesqlData = await queryBrowserWorkitemsOnesql(card.chart_type, query)
         setData(browserOnesqlData)
-        setQueryTimeMs(browserOnesqlData.query_time_ms ?? Date.now() - startedAt)
-        setDataSource(getDataSourceLabel(browserOnesqlData.debug?.provider))
-        setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
       } catch (fallbackError: any) {
         setData(null)
         setError(
@@ -560,7 +550,6 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
             ? `${fallbackError.message}；后端错误：${e.message || '未知'}`
             : e.message || '查询失败：未获取到全量真实数据',
         )
-        setQueryTimeMs(Date.now() - startedAt)
       }
     } finally {
       setLoading(false)
@@ -702,11 +691,6 @@ export const ChartCard: React.FC<Props> = ({ card, dashboardUuid, onDelete, onCo
       <div style={S.cardBody}>
         <div style={getChartViewportStyle(card.chart_type)}>
           {renderChart()}
-        </div>
-        <div style={S.cardMeta}>
-          <span>数据源：{dataSource}</span>
-          <span>耗时：{queryTimeMs === null ? '-' : `${queryTimeMs}ms`}</span>
-          <span>更新：{lastUpdated || '-'}</span>
         </div>
       </div>
     </div>
