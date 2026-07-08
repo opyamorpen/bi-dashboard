@@ -231,22 +231,61 @@ const S: any = {
   confirmActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 },
 }
 
+const CHART_TYPE_LABELS: Record<string, string> = {
+  number: '数字指标卡',
+  bar: '柱状图',
+  pie: '饼图',
+  donut: '环形图',
+  table: '明细表格',
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  uuid: '工作项',
+  title: '标题',
+  issue_type: '工作项类型',
+  status: '状态',
+  assignee: '负责人',
+  priority: '优先级',
+  project_uuid: '项目',
+  created_at: '创建时间',
+}
+
+const AGGREGATION_LABELS: Record<string, string> = {
+  count: '计数',
+  count_distinct: '去重计数',
+}
+
+const FILTER_OPERATOR_LABELS: Record<string, string> = {
+  eq: '等于',
+  neq: '不等于',
+  in: '属于',
+  not_in: '不属于',
+  contains: '包含',
+  empty: '为空',
+  not_empty: '不为空',
+}
+
+function labelOf(map: Record<string, string>, key: any, empty = '未指定'): string {
+  if (key === null || key === undefined || key === '') return empty
+  return map[String(key)] || String(key)
+}
+
 function formatDraftSummary(draft: any): string {
   if (!draft) return '已生成报表卡片草稿。'
-  const filters = (draft.filters || []).length > 0 ? JSON.stringify(draft.filters) : '无'
+  const filters = formatFilters(draft.filters || [])
   const scope =
     Object.keys(draft.data_scope || {}).length > 0
       ? JSON.stringify(draft.data_scope)
       : '默认工作项数据集'
   const cards = (draft.cards || [])
     .map((card: any, index: number) => {
-      const metric = `${card.metric?.name || 'count'}(${card.metric?.aggregation || 'count'} ${card.metric?.field_key || 'uuid'})`
-      const dimension = card.dimension?.name || card.dimension?.field_key || '无维度'
-      return `${index + 1}. ${card.title}：${card.chart_type}，指标 ${metric}，维度 ${dimension}`
+      const metric = formatMetric(card.metric)
+      const dimension = formatDimension(card)
+      return `${index + 1}. ${card.title}：${labelOf(CHART_TYPE_LABELS, card.chart_type)}，指标 ${metric}，维度 ${dimension}`
     })
     .join('\n')
   return [
-    `我理解的报表卡片需求：${draft.title}`,
+    `我理解的卡片需求：${draft.title}`,
     draft.description ? `说明：${draft.description}` : '',
     `数据范围：${scope}`,
     `筛选条件：${filters}`,
@@ -267,38 +306,74 @@ function formatDraftValue(value: any, empty = '未指定'): string {
   return String(value)
 }
 
+function formatMetric(metric: any): string {
+  const aggregation = labelOf(AGGREGATION_LABELS, metric?.aggregation || 'count')
+  const field = labelOf(FIELD_LABELS, metric?.field_key || 'uuid')
+  return `${aggregation} / ${field}`
+}
+
+function formatDimension(card: any): string {
+  if (card.chart_type === 'number') return '无，数字指标卡展示总值'
+  const fieldKey = card.dimension?.field_key
+  return fieldKey ? labelOf(FIELD_LABELS, fieldKey) : '无'
+}
+
+function formatFilters(filters: any[]): string {
+  if (!Array.isArray(filters) || filters.length === 0) return '无'
+  return filters
+    .map((filter: any) => {
+      const field = labelOf(FIELD_LABELS, filter.field_key)
+      const operator = labelOf(FILTER_OPERATOR_LABELS, filter.operator)
+      if (filter.operator === 'empty' || filter.operator === 'not_empty')
+        return `${field} ${operator}`
+      const value = Array.isArray(filter.value)
+        ? filter.value.join('、')
+        : String(filter.value ?? '')
+      return `${field} ${operator} ${value}`
+    })
+    .join('；')
+}
+
+function formatLayout(layout: any): string {
+  if (!layout) return '自动追加到当前仪表盘底部'
+  return `${Number(layout.w) || 8} × ${Number(layout.h) || 6} 格，添加时自动避开已有卡片`
+}
+
 const DraftConfirmCard: React.FC<any> = ({ draft, aiBusy, onConfirm }) => {
   if (!draft) return null
+  const cards = Array.isArray(draft.cards) ? draft.cards : []
+  const cardCount = Math.max(cards.length, 1)
   return (
     <div style={S.confirmCard}>
-      <div style={S.confirmTitle}>报表配置确认</div>
+      <div style={S.confirmTitle}>卡片配置确认</div>
       <div style={S.confirmGrid}>
-        <div style={S.miniLabel}>报表名称</div>
-        <div>{draft.title || '未命名固定报表'}</div>
+        <div style={S.miniLabel}>需求标题</div>
+        <div>{draft.title || '未命名卡片需求'}</div>
+        <div style={S.miniLabel}>新增数量</div>
+        <div>{cardCount} 张卡片，添加到当前仪表盘</div>
         <div style={S.miniLabel}>数据范围</div>
         <div>{formatDraftValue(draft.data_scope, '默认工作项数据集')}</div>
         <div style={S.miniLabel}>筛选条件</div>
-        <div>{formatDraftValue(draft.filters, '无')}</div>
+        <div>{formatFilters(draft.filters || [])}</div>
       </div>
       <div style={S.cardList}>
-        {(draft.cards || []).map((card: any, index: number) => (
+        {cards.map((card: any, index: number) => (
           <div key={index} style={S.cardItem}>
             <div style={S.cardItemTitle}>
               {index + 1}. {card.title || `卡片 ${index + 1}`}
             </div>
             <div style={S.cardItemMeta}>
-              图表：{card.chart_type || 'number'}；指标：
-              {card.metric?.name || 'count'} / {card.metric?.aggregation || 'count'} /{' '}
-              {card.metric?.field_key || 'uuid'}；维度：
-              {card.dimension?.name || card.dimension?.field_key || '无'}；布局：
-              {formatDraftValue(card.layout)}
+              数据集：默认工作项数据集；图表：{labelOf(CHART_TYPE_LABELS, card.chart_type)}；指标：
+              {formatMetric(card.metric)}；维度：{formatDimension(card)}；TopN/明细行数：
+              {card.limit || (card.chart_type === 'table' ? 50 : 15)}；推荐尺寸：
+              {formatLayout(card.layout)}
             </div>
           </div>
         ))}
       </div>
       <div style={S.confirmActions}>
         <button style={S.btn(true)} onClick={onConfirm} disabled={aiBusy}>
-          确认添加到仪表盘
+          添加 {cardCount} 张卡片到当前仪表盘
         </button>
       </div>
     </div>
@@ -470,6 +545,7 @@ const App: React.FC = () => {
   const [newName, setNewName] = useState('')
   const [currentUuid, setCurrentUuid] = useState('')
   const [detailReloadToken, setDetailReloadToken] = useState(0)
+  const [detailNotice, setDetailNotice] = useState('')
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiImage, setAiImage] = useState<any>(null)
   const [aiDraft, setAiDraft] = useState<any>(null)
@@ -646,7 +722,11 @@ const App: React.FC = () => {
     if (!aiDraft || !currentUuid) return
     setAiBusy(true)
     try {
-      await apiPost('/bi/report/from-draft', { draft: aiDraft, dashboard_uuid: currentUuid })
+      const res = await apiPost('/bi/report/from-draft', {
+        draft: aiDraft,
+        dashboard_uuid: currentUuid,
+      })
+      const count = res.data?.card_count || aiDraft.cards?.length || 1
       setShowAiReport(false)
       setAiDraft(null)
       setAiMessages([])
@@ -654,6 +734,7 @@ const App: React.FC = () => {
       setAiImage(null)
       setAiError('')
       await saveAiSession([], null)
+      setDetailNotice(`已新增 ${count} 张 AI 报表卡片`)
       setDetailReloadToken((value) => value + 1)
     } catch (e: any) {
       setAiError(e.message || '添加 AI 卡片失败')
@@ -668,6 +749,7 @@ const App: React.FC = () => {
         <DashboardDetail
           dashboardUuid={currentUuid}
           reloadToken={detailReloadToken}
+          notice={detailNotice}
           onOpenAiReport={openAiReport}
           onBack={() => {
             setCurrentUuid('')

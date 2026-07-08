@@ -23,6 +23,7 @@ const DEFAULT_AI_SKILL_PROMPT = [
   '你是 ONES 报表需求分析助手，需要通过多轮对话帮助用户澄清固定报表卡片配置。',
   '每轮先判断需求是否足够生成报表配置。',
   '必须确认或推断这些信息：数据范围、图表类型、分析指标、分析维度、筛选条件、卡片标题。',
+  '默认只生成 1 张报表卡片；只有用户明确要求多个图表、多张卡片或同时添加多个分析项时，draft.cards 才能包含多张卡片。',
   '如果信息不足，status 返回 clarifying，并用 reply 继续追问最关键的 1-3 个问题。',
   '如果信息足够，status 返回 ready，reply 用自然语言总结需求，draft 返回完整 ReportDraft。',
   'thinking_summary 只输出面向用户的分析摘要、已确认项、待确认项和配置生成动作，不要暴露内部隐藏推理链。',
@@ -49,6 +50,7 @@ const SUPPORTED_FILTER_OPERATORS = new Set([
   'not_empty',
 ])
 const SUPPORTED_AGGREGATIONS = new Set(['count', 'count_distinct'])
+const DASHBOARD_GRID_COLUMNS = 18
 const DEFAULT_ISSUE_FIELDS = [
   { key: 'uuid', label: '工作项UUID', type: 'text', dimension: false, metric: false },
   { key: 'title', label: '标题', type: 'text', dimension: true, metric: false },
@@ -370,7 +372,7 @@ function sanitizeLayout(layout: any, index: number, chartType: string): any {
 
 function sanitizeReportDraft(input: any): any {
   const source = input?.draft && typeof input.draft === 'object' ? input.draft : input
-  const title = String(source?.title || '未命名固定报表').slice(0, 120)
+  const title = String(source?.title || '未命名卡片需求').slice(0, 120)
   const filters = Array.isArray(source?.filters)
     ? source.filters.map(sanitizeFilter).filter(Boolean).slice(0, 20)
     : []
@@ -540,6 +542,61 @@ function draftCardToStoredCard(card: any, index: number, filters: any[] = []): a
   }
 }
 
+function normalizeStoredCardLayout(card: any, index: number): any {
+  return sanitizeLayout(card?.layout, index, card?.chart_type || 'number')
+}
+
+function layoutCardsForAppend(cards: any[], existingCards: any[]): any[] {
+  const safeExisting = Array.isArray(existingCards) ? existingCards : []
+  const bottomY = safeExisting.reduce((bottom: number, card: any, index: number) => {
+    const layout = normalizeStoredCardLayout(card, index)
+    return Math.max(bottom, layout.y + layout.h)
+  }, 0)
+  let cursorX = 0
+  let cursorY = bottomY > 0 ? bottomY + 1 : 0
+  let rowH = 0
+
+  return cards.map((card: any, index: number) => {
+    const layout = normalizeStoredCardLayout(card, index)
+    const w = Math.min(Math.max(layout.w || 8, 4), DASHBOARD_GRID_COLUMNS)
+    const h = Math.max(layout.h || 4, 3)
+    if (cursorX > 0 && cursorX + w > DASHBOARD_GRID_COLUMNS) {
+      cursorX = 0
+      cursorY += rowH + 1
+      rowH = 0
+    }
+    const nextCard = {
+      ...card,
+      layout: {
+        ...layout,
+        x: cursorX,
+        y: cursorY,
+        w,
+        h,
+        grid_size: 48,
+      },
+    }
+    cursorX += w + 1
+    rowH = Math.max(rowH, h)
+    return nextCard
+  })
+}
+
+function summarizeStoredCard(card: any): any {
+  const query = safeJsonParse(card.query_json, {})
+  const metric = query.metrics?.[0] || {}
+  const dimension = query.dimensions?.[0] || null
+  return {
+    card_uuid: card.card_uuid,
+    title: card.title,
+    chart_type: card.chart_type,
+    metric,
+    dimension,
+    filters: query.filters || [],
+    layout: card.layout,
+  }
+}
+
 // ============================================================
 // 生命周期
 // ============================================================
@@ -648,6 +705,7 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
     '你只能返回严格 JSON，不要返回 Markdown，不要解释。',
     '返回结构必须是 {"status":"clarifying|ready","reply":"展示给用户看的中文回复","thinking_summary":"面向用户的分析摘要，不是内部推理链","confirmed":{"data_scope":"...","chart_type":"...","metrics":"...","dimensions":"...","filters":"..."},"missing":["..."],"draft":null|ReportDraft}。',
     'ReportDraft 结构必须是 {title,description,data_scope,filters,cards}。',
+    '用户没有明确要求多个图表、多张卡片或同时添加多个分析项时，draft.cards 必须只包含 1 张卡片。',
     '不要生成 SQL、ONESQL 或 JavaScript。',
     '字段只能使用: uuid,title,issue_type,status,assignee,priority,project_uuid,created_at。',
     'chart_type 只能使用: number,bar,pie,donut,table。',
@@ -753,6 +811,10 @@ export async function createReportFromDraft(req: any): Promise<PluginResponse> {
     if (d.team_uuid !== teamUUID)
       return { body: { error: '仪表盘不属于当前团队' }, statusCode: 403 }
     const existingCards = safeJsonParse(d.cards_json, [])
+    const appendedCards = layoutCardsForAppend(
+      cards,
+      Array.isArray(existingCards) ? existingCards : [],
+    )
     const nextConfig = {
       ...safeJsonParse(d.config_json, {}),
       report_mode: 'fixed',
@@ -765,7 +827,10 @@ export async function createReportFromDraft(req: any): Promise<PluginResponse> {
       cleanForSet({
         ...d,
         config_json: jsonText(nextConfig),
-        cards_json: jsonText([...(Array.isArray(existingCards) ? existingCards : []), ...cards]),
+        cards_json: jsonText([
+          ...(Array.isArray(existingCards) ? existingCards : []),
+          ...appendedCards,
+        ]),
         updated_at: now,
       }),
     )
@@ -778,7 +843,8 @@ export async function createReportFromDraft(req: any): Promise<PluginResponse> {
         data: {
           dashboard_uuid: targetDashboardUuid,
           name: d.name,
-          card_count: cards.length,
+          card_count: appendedCards.length,
+          cards: appendedCards.map(summarizeStoredCard),
           append: true,
         },
       },
@@ -1340,7 +1406,8 @@ async function executeOnesqlQuery(
     const agg = m.aggregation || 'count'
     const field = m.field_key || '*'
     if (agg === 'count') return `count(*) as ${m.name || 'count'}`
-    if (agg === 'distinct_count') return `count(distinct ${field}) as ${m.name || 'distinct_count'}`
+    if (agg === 'distinct_count' || agg === 'count_distinct')
+      return `count(distinct ${field}) as ${m.name || 'count_distinct'}`
     if (agg === 'sum') return `sum(${field}) as ${m.name || 'sum'}`
     if (agg === 'avg') return `avg(${field}) as ${m.name || 'avg'}`
     if (agg === 'max') return `max(${field}) as ${m.name || 'max'}`
