@@ -25,7 +25,8 @@ const DEFAULT_AI_SKILL_PROMPT = [
   '必须确认或推断这些信息：数据范围、图表类型、分析指标、分析维度、筛选条件、卡片标题。',
   '如果信息不足，status 返回 clarifying，并用 reply 继续追问最关键的 1-3 个问题。',
   '如果信息足够，status 返回 ready，reply 用自然语言总结需求，draft 返回完整 ReportDraft。',
-  '不要暴露内部推理链；只展示面向用户的分析结论、待确认点和执行结果。',
+  'thinking_summary 只输出面向用户的分析摘要、已确认项、待确认项和配置生成动作，不要暴露内部隐藏推理链。',
+  'confirmed 返回当前已确认的信息，missing 返回仍需用户确认的问题列表。',
 ].join('\n')
 const SUPPORTED_CHART_TYPES = new Set(['number', 'bar', 'pie', 'donut', 'table'])
 const SUPPORTED_FIELDS = new Set([
@@ -407,9 +408,27 @@ function sanitizeReportDraft(input: any): any {
 }
 
 function sanitizeAiDialogResult(input: any): any {
-  const status = input?.status === 'ready' ? 'ready' : 'clarifying'
+  const requestedStatus = input?.status === 'ready' ? 'ready' : 'clarifying'
   const reply = String(input?.reply || '').trim()
-  const draft = status === 'ready' && input?.draft ? sanitizeReportDraft(input.draft) : null
+  const thinkingSummary = String(input?.thinking_summary || '').trim()
+  const confirmedSource =
+    input?.confirmed && typeof input.confirmed === 'object' ? input.confirmed : {}
+  const confirmed = {
+    data_scope: String(confirmedSource.data_scope || ''),
+    chart_type: String(confirmedSource.chart_type || ''),
+    metrics: String(confirmedSource.metrics || ''),
+    dimensions: String(confirmedSource.dimensions || ''),
+    filters: String(confirmedSource.filters || ''),
+  }
+  const missing = Array.isArray(input?.missing)
+    ? input.missing
+        .map((item: any) => String(item || '').trim())
+        .filter(Boolean)
+        .slice(0, 10)
+    : []
+  const draft =
+    requestedStatus === 'ready' && input?.draft ? sanitizeReportDraft(input.draft) : null
+  const status = draft ? 'ready' : 'clarifying'
   return {
     status,
     reply:
@@ -417,6 +436,13 @@ function sanitizeAiDialogResult(input: any): any {
       (draft
         ? `我已根据当前对话整理出「${draft.title}」的报表配置草稿，请确认是否添加到当前仪表盘。`
         : '我需要继续确认报表的数据范围、指标、维度和图表类型。'),
+    thinking_summary:
+      thinkingSummary ||
+      (draft
+        ? '已完成需求澄清，并将数据范围、指标、维度、筛选条件和图表类型转换为插件支持的报表配置。'
+        : '已根据当前输入识别部分报表需求，仍需继续确认关键信息。'),
+    confirmed,
+    missing,
     draft,
   }
 }
@@ -560,13 +586,15 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
   const systemPrompt = [
     skillPrompt,
     '你只能返回严格 JSON，不要返回 Markdown，不要解释。',
-    '返回结构必须是 {"status":"clarifying|ready","reply":"展示给用户看的中文回复","draft":null|ReportDraft}。',
+    '返回结构必须是 {"status":"clarifying|ready","reply":"展示给用户看的中文回复","thinking_summary":"面向用户的分析摘要，不是内部推理链","confirmed":{"data_scope":"...","chart_type":"...","metrics":"...","dimensions":"...","filters":"..."},"missing":["..."],"draft":null|ReportDraft}。',
     'ReportDraft 结构必须是 {title,description,data_scope,filters,cards}。',
     '不要生成 SQL、ONESQL 或 JavaScript。',
     '字段只能使用: uuid,title,issue_type,status,assignee,priority,project_uuid,created_at。',
     'chart_type 只能使用: number,bar,pie,donut,table。',
     'aggregation 只能使用: count,count_distinct。',
     '如果用户是在已有草稿基础上提出调整，你必须基于当前草稿修改，而不是重新开始。',
+    'status=clarifying 时 draft 必须为 null；status=ready 时 draft 必须为完整 ReportDraft。',
+    'thinking_summary、confirmed、missing 必须与本轮回复一致，并且只能包含可展示给用户的分析摘要。',
   ].join('\n')
   const history = Array.isArray(b.history) ? b.history.slice(-10) : []
   const currentDraft = b.current_draft ? sanitizeReportDraft(b.current_draft) : null

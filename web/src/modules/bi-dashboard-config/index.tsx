@@ -146,16 +146,16 @@ const ConfigApp: React.FC = () => {
             </label>
           </div>
           <div style={S.section}>
-            <label style={S.label}>报表需求澄清 Skill</label>
+            <label style={S.label}>报表需求澄清流程</label>
             <textarea
               style={S.textarea}
               value={config.skill_prompt || ''}
               onChange={(e) => setConfig({ ...config, skill_prompt: e.target.value })}
-              placeholder="配置 AI 在报表需求对话中的确认流程和输出规则"
+              placeholder="配置 AI 在报表需求对话中的确认流程、分析摘要和输出规则"
             />
             <div style={S.help}>
               用于约束 AI
-              如何追问数据范围、图表类型、指标、维度和筛选条件，并在需求明确后转换为插件支持的报表配置。
+              如何追问数据范围、图表类型、指标、维度和筛选条件，并在需求明确后转换为插件支持的报表配置。分析摘要只展示面向用户的结论，不展示隐藏内部推理链。
             </div>
           </div>
           <button style={S.btn(true)} onClick={save} disabled={saving}>

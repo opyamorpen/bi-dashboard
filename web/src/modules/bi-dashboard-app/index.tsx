@@ -126,6 +126,22 @@ const S: any = {
     color: '#333',
     fontSize: 13,
   }),
+  thinkingBox: {
+    marginTop: 10,
+    borderTop: '1px solid rgba(0,0,0,0.08)',
+    paddingTop: 8,
+    color: '#4e5969',
+    fontSize: 12,
+  },
+  thinkingSummary: {
+    cursor: 'pointer',
+    color: '#4e5969',
+    fontWeight: 500,
+    outline: 'none',
+  },
+  thinkingContent: { marginTop: 8, lineHeight: 1.6 },
+  miniGrid: { display: 'grid', gridTemplateColumns: '96px 1fr', gap: '4px 8px', marginTop: 8 },
+  miniLabel: { color: '#86909c' },
   chatImage: {
     display: 'block',
     width: 180,
@@ -190,6 +206,20 @@ const S: any = {
     fontSize: 13,
     fontWeight: 600,
   },
+  confirmCard: {
+    margin: '0 22px 18px',
+    padding: 14,
+    border: '1px solid #d9e8ff',
+    borderRadius: 8,
+    background: '#f7fbff',
+  },
+  confirmTitle: { fontSize: 15, fontWeight: 600, marginBottom: 10 },
+  confirmGrid: { display: 'grid', gridTemplateColumns: '110px 1fr', gap: '6px 10px', fontSize: 13 },
+  cardList: { display: 'grid', gap: 8, marginTop: 10 },
+  cardItem: { background: '#fff', border: '1px solid #e8eef7', borderRadius: 6, padding: 10 },
+  cardItemTitle: { fontWeight: 600, marginBottom: 6 },
+  cardItemMeta: { color: '#4e5969', fontSize: 12, lineHeight: 1.6 },
+  confirmActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 },
 }
 
 function formatDraftSummary(draft: any): string {
@@ -218,6 +248,87 @@ function formatDraftSummary(draft: any): string {
     .join('\n')
 }
 
+function formatDraftValue(value: any, empty = '未指定'): string {
+  if (value === null || value === undefined || value === '') return empty
+  if (Array.isArray(value)) return value.length > 0 ? JSON.stringify(value) : empty
+  if (typeof value === 'object') {
+    const keys = Object.keys(value)
+    return keys.length > 0 ? JSON.stringify(value) : empty
+  }
+  return String(value)
+}
+
+const DraftConfirmCard: React.FC<any> = ({ draft, aiBusy, onConfirm }) => {
+  if (!draft) return null
+  return (
+    <div style={S.confirmCard}>
+      <div style={S.confirmTitle}>报表配置确认</div>
+      <div style={S.confirmGrid}>
+        <div style={S.miniLabel}>报表名称</div>
+        <div>{draft.title || '未命名固定报表'}</div>
+        <div style={S.miniLabel}>数据范围</div>
+        <div>{formatDraftValue(draft.data_scope, '默认工作项数据集')}</div>
+        <div style={S.miniLabel}>筛选条件</div>
+        <div>{formatDraftValue(draft.filters, '无')}</div>
+      </div>
+      <div style={S.cardList}>
+        {(draft.cards || []).map((card: any, index: number) => (
+          <div key={index} style={S.cardItem}>
+            <div style={S.cardItemTitle}>
+              {index + 1}. {card.title || `卡片 ${index + 1}`}
+            </div>
+            <div style={S.cardItemMeta}>
+              图表：{card.chart_type || 'number'}；指标：
+              {card.metric?.name || 'count'} / {card.metric?.aggregation || 'count'} /{' '}
+              {card.metric?.field_key || 'uuid'}；维度：
+              {card.dimension?.name || card.dimension?.field_key || '无'}；布局：
+              {formatDraftValue(card.layout)}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={S.confirmActions}>
+        <button style={S.btn(true)} onClick={onConfirm} disabled={aiBusy}>
+          确认添加到仪表盘
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const ThinkingDetails: React.FC<any> = ({ message }) => {
+  const hasThinking =
+    message.thinking_summary ||
+    Object.values(message.confirmed || {}).some((value: any) => Boolean(value)) ||
+    (message.missing || []).length > 0
+  if (!hasThinking) return null
+  return (
+    <details style={S.thinkingBox}>
+      <summary style={S.thinkingSummary}>分析过程摘要</summary>
+      <div style={S.thinkingContent}>
+        {message.thinking_summary && <div>{message.thinking_summary}</div>}
+        {message.confirmed && (
+          <div style={S.miniGrid}>
+            <div style={S.miniLabel}>数据范围</div>
+            <div>{message.confirmed.data_scope || '未确认'}</div>
+            <div style={S.miniLabel}>图表类型</div>
+            <div>{message.confirmed.chart_type || '未确认'}</div>
+            <div style={S.miniLabel}>分析指标</div>
+            <div>{message.confirmed.metrics || '未确认'}</div>
+            <div style={S.miniLabel}>分析维度</div>
+            <div>{message.confirmed.dimensions || '未确认'}</div>
+            <div style={S.miniLabel}>筛选条件</div>
+            <div>{message.confirmed.filters || '未确认'}</div>
+          </div>
+        )}
+        {(message.missing || []).length > 0 && (
+          <div style={{ marginTop: 8 }}>待确认：{message.missing.join('；')}</div>
+        )}
+      </div>
+    </details>
+  )
+}
+
 const AiReportDialogContent: React.FC<any> = ({
   aiBusy,
   aiDraft,
@@ -242,13 +353,6 @@ const AiReportDialogContent: React.FC<any> = ({
       : aiMessages.length > 0
         ? '持续对话'
         : '等待输入'
-  const processText = aiBusy
-    ? '执行过程：\n1. 读取当前对话和附件上下文\n2. 解析数据范围、指标、维度和图表类型\n3. 校验字段和图表白名单\n4. 生成可添加到仪表盘的卡片草稿'
-    : aiDraft
-      ? '执行过程：\n1. 已完成需求解析\n2. 已完成字段和图表类型校验\n3. 等待继续调整或确认添加'
-      : aiMessages.length > 0
-        ? '执行过程：AI 正在按配置的需求澄清流程继续确认报表的数据范围、图表类型、指标、维度和筛选条件。'
-        : '执行过程：等待输入需求；可以粘贴截图或点击左下角 + 添加图片。'
 
   return (
     <>
@@ -269,9 +373,7 @@ const AiReportDialogContent: React.FC<any> = ({
         {aiMessages.map((item: any, index: number) => (
           <div key={index} style={S.chatMsgWrap(item.role)}>
             <div style={S.chatMsg(item.role)}>
-              <strong>
-                {item.role === 'user' ? '用户' : item.role === 'process' ? '过程' : 'AI'}：
-              </strong>
+              <strong>{item.role === 'user' ? '用户' : 'AI'}：</strong>
               {item.content}
               {(item.images || []).map((image: any, imageIndex: number) => (
                 <span key={`${index}-${imageIndex}`}>
@@ -279,13 +381,12 @@ const AiReportDialogContent: React.FC<any> = ({
                   <span style={S.chatImageName}>{image.name || '图片'}</span>
                 </span>
               ))}
+              {item.role === 'assistant' && <ThinkingDetails message={item} />}
             </div>
           </div>
         ))}
-        <div style={S.chatMsgWrap('process')}>
-          <div style={S.chatMsg('process')}>{processText}</div>
-        </div>
       </div>
+      <DraftConfirmCard draft={aiDraft} aiBusy={aiBusy} onConfirm={handleCreateFromDraft} />
       <div style={S.composer}>
         <div style={S.composerBox}>
           <textarea
@@ -333,18 +434,10 @@ const AiReportDialogContent: React.FC<any> = ({
                     setAiDraft(null)
                     setAiMessages([])
                     setAiPrompt('')
+                    setAiImage(null)
                   }}
                 >
                   重新开始
-                </button>
-              )}
-              {aiDraft && (
-                <button
-                  style={{ ...S.btn(true), marginRight: 8 }}
-                  onClick={handleCreateFromDraft}
-                  disabled={aiBusy}
-                >
-                  确认添加
                 </button>
               )}
               <button style={S.sendBtn} onClick={handleGenerateDraft} disabled={aiBusy}>
@@ -474,15 +567,20 @@ const App: React.FC = () => {
       })
       const result = res.data || {}
       const draft = result.status === 'ready' ? result.draft : null
-      const assistantText = [
+      const assistantText =
         result.reply ||
-          (draft ? '已整理出报表配置草稿，请确认是否添加。' : '我需要继续确认报表需求。'),
-        draft ? `\n已整理的配置草稿：\n${formatDraftSummary(draft)}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n')
+        (draft ? '已整理出报表配置草稿，请确认是否添加。' : '我需要继续确认报表需求。')
       setAiDraft(draft)
-      setAiMessages([...nextMessages, { role: 'assistant', content: assistantText }])
+      setAiMessages([
+        ...nextMessages,
+        {
+          role: 'assistant',
+          content: assistantText,
+          thinking_summary: result.thinking_summary || '',
+          confirmed: result.confirmed || {},
+          missing: result.missing || [],
+        },
+      ])
     } catch (e: any) {
       setMsg(e.message || '生成报表草稿失败')
     } finally {
