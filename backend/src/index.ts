@@ -19,6 +19,14 @@ const reportSnapshotEntity = storage.entity('bi_report_snapshot')
 
 const DEFAULT_DATASET_UUID = 'default_issue_dataset'
 const AI_CONFIG_KEY = 'ai'
+const DEFAULT_AI_SKILL_PROMPT = [
+  '你是 ONES 报表需求分析助手，需要通过多轮对话帮助用户澄清固定报表卡片配置。',
+  '每轮先判断需求是否足够生成报表配置。',
+  '必须确认或推断这些信息：数据范围、图表类型、分析指标、分析维度、筛选条件、卡片标题。',
+  '如果信息不足，status 返回 clarifying，并用 reply 继续追问最关键的 1-3 个问题。',
+  '如果信息足够，status 返回 ready，reply 用自然语言总结需求，draft 返回完整 ReportDraft。',
+  '不要暴露内部推理链；只展示面向用户的分析结论、待确认点和执行结果。',
+].join('\n')
 const SUPPORTED_CHART_TYPES = new Set(['number', 'bar', 'pie', 'donut', 'table'])
 const SUPPORTED_FIELDS = new Set([
   'uuid',
@@ -30,7 +38,15 @@ const SUPPORTED_FIELDS = new Set([
   'project_uuid',
   'created_at',
 ])
-const SUPPORTED_FILTER_OPERATORS = new Set(['eq', 'neq', 'in', 'not_in', 'contains', 'empty', 'not_empty'])
+const SUPPORTED_FILTER_OPERATORS = new Set([
+  'eq',
+  'neq',
+  'in',
+  'not_in',
+  'contains',
+  'empty',
+  'not_empty',
+])
 const SUPPORTED_AGGREGATIONS = new Set(['count', 'count_distinct'])
 const DEFAULT_ISSUE_FIELDS = [
   { key: 'uuid', label: '工作项UUID', type: 'text', dimension: false, metric: false },
@@ -81,7 +97,8 @@ function readField(row: any, key: string): any {
   for (const alias of aliases) {
     const value = row[alias]
     if (value !== undefined && value !== null && value !== '') {
-      if (typeof value === 'object') return value.name || value.title || value.uuid || value.value || ''
+      if (typeof value === 'object')
+        return value.name || value.title || value.uuid || value.value || ''
       return value
     }
   }
@@ -248,7 +265,9 @@ async function writeAudit(
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = String(baseUrl || '').trim().replace(/\/+$/, '')
+  const trimmed = String(baseUrl || '')
+    .trim()
+    .replace(/\/+$/, '')
   if (!trimmed) return ''
   return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`
 }
@@ -266,7 +285,7 @@ function requestJson(urlText: string, apiKey: string, body: any): Promise<any> {
         path: `${url.pathname}${url.search}`,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Length': Buffer.byteLength(payload),
         },
       },
@@ -343,7 +362,9 @@ function sanitizeReportDraft(input: any): any {
     const aggregation = SUPPORTED_AGGREGATIONS.has(String(metric.aggregation))
       ? String(metric.aggregation)
       : 'count'
-    const metricField = SUPPORTED_FIELDS.has(String(metric.field_key)) ? String(metric.field_key) : 'uuid'
+    const metricField = SUPPORTED_FIELDS.has(String(metric.field_key))
+      ? String(metric.field_key)
+      : 'uuid'
     const dimension =
       card?.dimension && SUPPORTED_FIELDS.has(String(card.dimension.field_key))
         ? {
@@ -378,14 +399,37 @@ function sanitizeReportDraft(input: any): any {
   return {
     title,
     description: String(source?.description || '').slice(0, 1000),
-    data_scope: source?.data_scope && typeof source.data_scope === 'object' ? source.data_scope : {},
+    data_scope:
+      source?.data_scope && typeof source.data_scope === 'object' ? source.data_scope : {},
     filters,
     cards,
   }
 }
 
+function sanitizeAiDialogResult(input: any): any {
+  const status = input?.status === 'ready' ? 'ready' : 'clarifying'
+  const reply = String(input?.reply || '').trim()
+  const draft = status === 'ready' && input?.draft ? sanitizeReportDraft(input.draft) : null
+  return {
+    status,
+    reply:
+      reply ||
+      (draft
+        ? `我已根据当前对话整理出「${draft.title}」的报表配置草稿，请确认是否添加到当前仪表盘。`
+        : '我需要继续确认报表的数据范围、指标、维度和图表类型。'),
+    draft,
+  }
+}
+
 function draftCardToStoredCard(card: any, index: number, filters: any[] = []): any {
-  const dimension = card.dimension ? [{ field_key: card.dimension.field_key, name: card.dimension.name || card.dimension.field_key }] : []
+  const dimension = card.dimension
+    ? [
+        {
+          field_key: card.dimension.field_key,
+          name: card.dimension.name || card.dimension.field_key,
+        },
+      ]
+    : []
   const metricName = card.metric?.name || 'count'
   return {
     card_uuid: makeUuid(),
@@ -393,7 +437,13 @@ function draftCardToStoredCard(card: any, index: number, filters: any[] = []): a
     chart_type: card.chart_type || 'number',
     dataset_uuid: DEFAULT_DATASET_UUID,
     query_json: JSON.stringify({
-      metrics: [{ name: metricName, aggregation: card.metric?.aggregation || 'count', field_key: card.metric?.field_key || 'uuid' }],
+      metrics: [
+        {
+          name: metricName,
+          aggregation: card.metric?.aggregation || 'count',
+          field_key: card.metric?.field_key || 'uuid',
+        },
+      ],
       dimensions: card.chart_type === 'number' ? [] : dimension,
       filters,
       sort: [],
@@ -439,6 +489,7 @@ export async function getAiConfig(req: any): Promise<PluginResponse> {
         base_url: config.base_url || '',
         model: config.model || '',
         supports_vision: Boolean(config.supports_vision),
+        skill_prompt: config.skill_prompt || DEFAULT_AI_SKILL_PROMPT,
         has_api_key: Boolean(config.api_key),
         updated_at: row?.updated_at || 0,
       },
@@ -456,6 +507,8 @@ export async function saveAiConfig(req: any): Promise<PluginResponse> {
     base_url: String(b.base_url || '').trim(),
     model: String(b.model || '').trim(),
     supports_vision: Boolean(b.supports_vision),
+    skill_prompt:
+      String(b.skill_prompt || DEFAULT_AI_SKILL_PROMPT).trim() || DEFAULT_AI_SKILL_PROMPT,
     api_key:
       b.api_key === undefined || b.api_key === null || b.api_key === ''
         ? existingConfig.api_key || ''
@@ -479,6 +532,7 @@ export async function saveAiConfig(req: any): Promise<PluginResponse> {
     base_url: nextConfig.base_url,
     model: nextConfig.model,
     supports_vision: nextConfig.supports_vision,
+    skill_prompt: nextConfig.skill_prompt,
   })
   return { body: { data: { ok: true, has_api_key: Boolean(nextConfig.api_key), updated_at: now } } }
 }
@@ -492,26 +546,40 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
   const row = (await appConfigEntity.get(getAiConfigKey(teamUUID))) as any
   const config = safeJsonParse(row?.config_json, {})
   if (!config.base_url || !config.model || !config.api_key) {
-    return { body: { error: 'AI 服务未配置，请先填写 base_url、model 和 api_key' }, statusCode: 400 }
+    return {
+      body: { error: 'AI 服务未配置，请先填写 base_url、model 和 api_key' },
+      statusCode: 400,
+    }
   }
   if (b.image?.data_url && !config.supports_vision) {
     return { body: { error: '当前 AI 配置未启用图片输入' }, statusCode: 400 }
   }
 
+  const skillPrompt =
+    String(config.skill_prompt || DEFAULT_AI_SKILL_PROMPT).trim() || DEFAULT_AI_SKILL_PROMPT
   const systemPrompt = [
-    '你是 ONES 固定报表配置助手。',
+    skillPrompt,
     '你只能返回严格 JSON，不要返回 Markdown，不要解释。',
+    '返回结构必须是 {"status":"clarifying|ready","reply":"展示给用户看的中文回复","draft":null|ReportDraft}。',
+    'ReportDraft 结构必须是 {title,description,data_scope,filters,cards}。',
     '不要生成 SQL、ONESQL 或 JavaScript。',
     '字段只能使用: uuid,title,issue_type,status,assignee,priority,project_uuid,created_at。',
     'chart_type 只能使用: number,bar,pie,donut,table。',
     'aggregation 只能使用: count,count_distinct。',
-    '返回结构必须是 {title,description,data_scope,filters,cards}。',
     '如果用户是在已有草稿基础上提出调整，你必须基于当前草稿修改，而不是重新开始。',
   ].join('\n')
   const history = Array.isArray(b.history) ? b.history.slice(-10) : []
   const currentDraft = b.current_draft ? sanitizeReportDraft(b.current_draft) : null
+  const historyImages = history
+    .flatMap((item: any) => (Array.isArray(item?.images) ? item.images : []))
+    .filter((image: any) => image?.data_url)
+    .slice(-4)
   const historyText = history
-    .map((item: any) => `${item.role === 'assistant' ? 'AI' : '用户'}: ${String(item.content || '').slice(0, 800)}`)
+    .map((item: any) => {
+      const imageCount = Array.isArray(item?.images) ? item.images.length : 0
+      const imageText = imageCount > 0 ? `（包含 ${imageCount} 张图片上下文）` : ''
+      return `${item.role === 'assistant' ? 'AI' : '用户'}: ${String(item.content || '').slice(0, 800)}${imageText}`
+    })
     .join('\n')
   const promptText = currentDraft
     ? [
@@ -519,9 +587,16 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
         JSON.stringify(currentDraft),
         historyText ? `\n最近对话：\n${historyText}` : '',
         `\n用户新的调整指令：\n${prompt}`,
-        '请输出调整后的完整 ReportDraft JSON。',
+        '请输出本轮对话结果 JSON。如果仍需澄清，draft 必须为 null；如果可以确认，draft 必须为完整 ReportDraft。',
       ].join('\n')
-    : `${systemPrompt}\n\n用户报表需求：\n${prompt}`
+    : [
+        '请根据用户输入和图片上下文推进报表需求澄清。',
+        historyText ? `最近对话：\n${historyText}` : '',
+        `用户本轮输入：\n${prompt}`,
+        '请输出本轮对话结果 JSON。如果仍需澄清，draft 必须为 null；如果可以确认，draft 必须为完整 ReportDraft。',
+      ]
+        .filter(Boolean)
+        .join('\n')
   const content: any[] = [
     {
       type: 'text',
@@ -531,19 +606,28 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
   if (b.image?.data_url) {
     content.push({ type: 'image_url', image_url: { url: b.image.data_url } })
   }
+  for (const image of historyImages) {
+    if (!b.image?.data_url || image.data_url !== b.image.data_url) {
+      content.push({ type: 'image_url', image_url: { url: image.data_url } })
+    }
+  }
 
   try {
-    const json = await requestJson(`${normalizeBaseUrl(config.base_url)}/chat/completions`, config.api_key, {
-      model: config.model,
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content },
-      ],
-    })
+    const json = await requestJson(
+      `${normalizeBaseUrl(config.base_url)}/chat/completions`,
+      config.api_key,
+      {
+        model: config.model,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content },
+        ],
+      },
+    )
     const text = json?.choices?.[0]?.message?.content || ''
-    const draft = sanitizeReportDraft(extractJsonObject(text))
-    return { body: { data: { draft, summary: draft.description || `已生成「${draft.title}」` } } }
+    const result = sanitizeAiDialogResult(extractJsonObject(text))
+    return { body: { data: result } }
   } catch (e: any) {
     Logger.error('[BI] generateReportDraft failed:', e?.message || e)
     return { body: { error: e?.message || 'AI 草稿生成失败' }, statusCode: 500 }
@@ -556,12 +640,15 @@ export async function createReportFromDraft(req: any): Promise<PluginResponse> {
   const b = (req.body || {}) as any
   const draft = sanitizeReportDraft(b.draft || b)
   const now = Date.now()
-  const cards = draft.cards.map((card: any, index: number) => draftCardToStoredCard(card, index, draft.filters || []))
+  const cards = draft.cards.map((card: any, index: number) =>
+    draftCardToStoredCard(card, index, draft.filters || []),
+  )
   const targetDashboardUuid = String(b.dashboard_uuid || '')
   if (targetDashboardUuid) {
     const d = (await dashboardEntity.get(targetDashboardUuid)) as any
     if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
-    if (d.team_uuid !== teamUUID) return { body: { error: '仪表盘不属于当前团队' }, statusCode: 403 }
+    if (d.team_uuid !== teamUUID)
+      return { body: { error: '仪表盘不属于当前团队' }, statusCode: 403 }
     const existingCards = safeJsonParse(d.cards_json, [])
     const nextConfig = {
       ...safeJsonParse(d.config_json, {}),
@@ -1091,7 +1178,10 @@ async function executeOnesql(
     }
   }
   // { type: "aggregate", aggregate: {...} } / { type: "aggregation", aggregation: {...} }
-  if (rawRows.length > 0 && (rawRows[0]?.type === 'aggregate' || rawRows[0]?.type === 'aggregation')) {
+  if (
+    rawRows.length > 0 &&
+    (rawRows[0]?.type === 'aggregate' || rawRows[0]?.type === 'aggregation')
+  ) {
     return { rows: rawRows.map((r: any) => r.aggregate || r.aggregation || {}), debug }
   }
   return { rows: Array.isArray(rawRows) ? rawRows : [], debug }
@@ -1174,12 +1264,14 @@ async function executeOnesqlQuery(
 }
 
 async function fetchIssueRowsByGraphQL(teamUUID: string, limit: number): Promise<any[]> {
-  const gqlRes = (await OPFetch(`/project/api/project/team/${teamUUID}/items/graphql?t=bi_issue_fallback`, {
-    method: 'POST',
-    teamUUID,
-    headers: { 'Content-Type': 'application/json' },
-    data: {
-      query: `{
+  const gqlRes = (await OPFetch(
+    `/project/api/project/team/${teamUUID}/items/graphql?t=bi_issue_fallback`,
+    {
+      method: 'POST',
+      teamUUID,
+      headers: { 'Content-Type': 'application/json' },
+      data: {
+        query: `{
         tasks(limit: ${Math.min(Math.max(limit, 1), 1000)}) {
           uuid
           name
@@ -1191,9 +1283,10 @@ async function fetchIssueRowsByGraphQL(teamUUID: string, limit: number): Promise
           owner { uuid name }
         }
       }`,
-      variables: {},
+        variables: {},
+      },
     },
-  })) as any
+  )) as any
   const raw = gqlRes?.data?.tasks || gqlRes?.data?.data?.tasks || []
   return Array.isArray(raw) ? raw.map(normalizeIssueRow) : []
 }
@@ -1216,7 +1309,9 @@ function filterRows(rows: any[], filters: any[]): any[] {
 function aggregateIssueRows(rows: any[], params: any): any[] {
   const chartType = params.chart_type || 'number'
   const dimensions = chartType === 'number' ? [] : params.dimensions || []
-  const metrics = params.metrics?.length ? params.metrics : [{ name: 'count', aggregation: 'count' }]
+  const metrics = params.metrics?.length
+    ? params.metrics
+    : [{ name: 'count', aggregation: 'count' }]
   const metricName = metrics[0]?.name || 'count'
   const limit = Math.min(params.limit || 100, 1000)
 
