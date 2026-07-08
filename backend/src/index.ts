@@ -38,6 +38,7 @@ const SUPPORTED_FIELDS = new Set([
   'assignee',
   'priority',
   'project_uuid',
+  'sprint',
   'created_at',
 ])
 const SUPPORTED_FILTER_OPERATORS = new Set([
@@ -59,6 +60,7 @@ const DEFAULT_ISSUE_FIELDS = [
   { key: 'assignee', label: '负责人', type: 'text', dimension: true, metric: false },
   { key: 'priority', label: '优先级', type: 'text', dimension: true, metric: false },
   { key: 'project_uuid', label: '项目', type: 'text', dimension: true, metric: false },
+  { key: 'sprint', label: '所属迭代', type: 'text', dimension: true, metric: false },
   { key: 'created_at', label: '创建时间', type: 'datetime', dimension: true, metric: false },
 ]
 
@@ -70,6 +72,7 @@ const FIELD_ALIASES: Record<string, string[]> = {
   assignee: ['assignee', 'assignee_name', 'assigneeName', 'assign', 'owner', 'owner_name'],
   priority: ['priority', 'priority_name', 'priorityName'],
   project_uuid: ['project_uuid', 'projectUUID', 'project', 'project_name', 'projectName'],
+  sprint: ['sprint', 'sprint_uuid', 'sprintUUID', 'iteration', 'iteration_uuid', 'field011'],
   created_at: ['created_at', 'create_time', 'createdTime', 'server_create_stamp'],
 }
 
@@ -430,6 +433,69 @@ function sanitizeReportDraft(input: any): any {
   }
 }
 
+function cloneDraft(draft: any): any {
+  return JSON.parse(JSON.stringify(draft || {}))
+}
+
+function applySimpleDraftInstruction(currentDraft: any, prompt: string): any | null {
+  if (!currentDraft) return null
+  const text = String(prompt || '')
+  const next = cloneDraft(currentDraft)
+  if (!Array.isArray(next.cards) || next.cards.length === 0) return sanitizeReportDraft(next)
+
+  if (/所属?迭代|迭代/.test(text)) {
+    next.cards = next.cards.map((card: any) => ({
+      ...card,
+      chart_type: card.chart_type === 'number' ? 'bar' : card.chart_type,
+      dimension: { field_key: 'sprint', name: '所属迭代' },
+    }))
+  }
+  if (/负责人|处理人|经办人/.test(text)) {
+    next.cards = next.cards.map((card: any) => ({
+      ...card,
+      chart_type: card.chart_type === 'number' ? 'bar' : card.chart_type,
+      dimension: { field_key: 'assignee', name: '负责人' },
+    }))
+  }
+  if (/工作项类型|类型/.test(text)) {
+    next.cards = next.cards.map((card: any) => ({
+      ...card,
+      chart_type: card.chart_type === 'number' ? 'bar' : card.chart_type,
+      dimension: { field_key: 'issue_type', name: '工作项类型' },
+    }))
+  }
+  if (/状态/.test(text)) {
+    next.cards = next.cards.map((card: any) => ({
+      ...card,
+      chart_type: card.chart_type === 'number' ? 'bar' : card.chart_type,
+      dimension: { field_key: 'status', name: '状态' },
+    }))
+  }
+  if (/项目/.test(text)) {
+    next.cards = next.cards.map((card: any) => ({
+      ...card,
+      chart_type: card.chart_type === 'number' ? 'bar' : card.chart_type,
+      dimension: { field_key: 'project_uuid', name: '项目' },
+    }))
+  }
+  if (/环形图|环图|donut/i.test(text)) {
+    next.cards = next.cards.map((card: any) => ({ ...card, chart_type: 'donut' }))
+  } else if (/饼图|pie/i.test(text)) {
+    next.cards = next.cards.map((card: any) => ({ ...card, chart_type: 'pie' }))
+  } else if (/柱状图|柱图|bar/i.test(text)) {
+    next.cards = next.cards.map((card: any) => ({ ...card, chart_type: 'bar' }))
+  } else if (/表格|明细|table/i.test(text)) {
+    next.cards = next.cards.map((card: any) => ({ ...card, chart_type: 'table' }))
+  } else if (/数字|指标卡|number/i.test(text)) {
+    next.cards = next.cards.map((card: any) => ({
+      ...card,
+      chart_type: 'number',
+      dimension: undefined,
+    }))
+  }
+  return sanitizeReportDraft(next)
+}
+
 function sanitizeAiDialogResult(input: any): any {
   const requestedStatus = input?.status === 'ready' ? 'ready' : 'clarifying'
   const reply = String(input?.reply || '').trim()
@@ -707,7 +773,7 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
     'ReportDraft 结构必须是 {title,description,data_scope,filters,cards}。',
     '用户没有明确要求多个图表、多张卡片或同时添加多个分析项时，draft.cards 必须只包含 1 张卡片。',
     '不要生成 SQL、ONESQL 或 JavaScript。',
-    '字段只能使用: uuid,title,issue_type,status,assignee,priority,project_uuid,created_at。',
+    '字段只能使用: uuid,title,issue_type,status,assignee,priority,project_uuid,sprint,created_at。用户说“所属迭代”时使用 field_key=sprint。',
     'chart_type 只能使用: number,bar,pie,donut,table。',
     'aggregation 只能使用: count,count_distinct。',
     '如果用户是在已有草稿基础上提出调整，你必须基于当前草稿修改，而不是重新开始。',
@@ -777,15 +843,18 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
       result = sanitizeAiDialogResult(extractJsonObject(text))
     } catch (parseError: any) {
       Logger.error('[BI] AI JSON parse failed:', parseError?.message || parseError)
+      const fallbackDraft = applySimpleDraftInstruction(currentDraft, prompt)
       result = sanitizeAiDialogResult({
-        status: 'clarifying',
-        reply:
-          '我收到了你的需求，但这次模型返回的配置格式不完整。请直接继续确认或重发一句完整需求，我会继续整理报表配置。',
-        thinking_summary:
-          'AI 已收到当前对话上下文，但返回内容未能转换为插件支持的结构化报表配置，因此保留对话并等待继续确认。',
+        status: fallbackDraft ? 'ready' : 'clarifying',
+        reply: fallbackDraft
+          ? '已根据你的调整更新报表卡片草稿，请确认是否添加到当前仪表盘。'
+          : '我收到了你的需求，但这次模型返回的配置格式不完整。请直接继续确认或重发一句完整需求，我会继续整理报表配置。',
+        thinking_summary: fallbackDraft
+          ? '模型返回内容未能直接解析为结构化 JSON，系统已基于当前草稿和本轮明确调整指令更新插件支持的卡片配置。'
+          : 'AI 已收到当前对话上下文，但返回内容未能转换为插件支持的结构化报表配置，因此保留对话并等待继续确认。',
         confirmed: {},
-        missing: ['需要重新确认完整报表需求'],
-        draft: null,
+        missing: fallbackDraft ? [] : ['需要重新确认完整报表需求'],
+        draft: fallbackDraft,
       })
     }
     return { body: { data: result } }

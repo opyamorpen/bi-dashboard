@@ -14,39 +14,107 @@ const S: any = {
     flexDirection: 'column',
     boxSizing: 'border-box' as any,
   },
-  cardHeader: { padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  cardHeader: {
+    padding: '12px 16px',
+    borderBottom: '1px solid #f0f0f0',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   cardHeaderDraggable: { cursor: 'move', userSelect: 'none' as any },
   cardTitle: { fontSize: 14, fontWeight: 600 },
   headerActions: { display: 'flex', alignItems: 'center', gap: 8 },
-  actionBtn: { border: 'none', background: 'transparent', cursor: 'pointer', color: '#1677ff', fontSize: 12, padding: 0 },
+  actionBtn: {
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    color: '#1677ff',
+    fontSize: 12,
+    padding: 0,
+  },
   cardBody: { padding: 16, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
-  chartViewport: { flex: 1, minHeight: 0, overflowY: 'auto' as any, overflowX: 'hidden' as any, paddingRight: 4 },
+  chartViewport: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto' as any,
+    overflowX: 'hidden' as any,
+    paddingRight: 4,
+  },
   chartViewportCompact: { flex: 1, minHeight: 0, overflow: 'hidden' },
   loading: { textAlign: 'center', padding: 40, color: '#999', fontSize: 13 },
   error: { textAlign: 'center', padding: 40, color: '#ff4d4f', fontSize: 13 },
-  retryBtn: { marginLeft: 8, border: 'none', background: 'transparent', cursor: 'pointer', color: '#1677ff', fontSize: 13, padding: 0 },
+  retryBtn: {
+    marginLeft: 8,
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    color: '#1677ff',
+    fontSize: 13,
+    padding: 0,
+  },
   empty: { textAlign: 'center', padding: 40, color: '#ccc', fontSize: 13 },
   numberValue: { fontSize: 36, fontWeight: 700, color: '#1677ff', textAlign: 'center' as any },
   numberLabel: { fontSize: 12, color: '#999', textAlign: 'center' as any, marginTop: 4 },
-  barRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 13, minHeight: 20 },
-  barLabel: { width: 100, textAlign: 'right' as any, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 },
+  barRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+    fontSize: 13,
+    minHeight: 20,
+  },
+  barLabel: {
+    width: 100,
+    textAlign: 'right' as any,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  },
   barTrack: { flex: 1, height: 20, background: '#f0f0f0', borderRadius: 4, overflow: 'hidden' },
   barFill: { height: '100%', background: '#1677ff', borderRadius: 4, transition: 'width 0.3s' },
   barValue: { width: 48, textAlign: 'right' as any, fontWeight: 600, flexShrink: 0 },
-  pieWrap: { display: 'flex', gap: 18, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' as any },
+  pieWrap: {
+    display: 'flex',
+    gap: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap' as any,
+  },
   pie: { width: 150, height: 150, borderRadius: '50%', flexShrink: 0 },
   donut: { width: 150, height: 150, borderRadius: '50%', flexShrink: 0 },
   donutInner: { width: 78, height: 78, borderRadius: '50%', background: '#fff' },
-  donutCenter: { position: 'absolute' as any, inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' as any },
+  donutCenter: {
+    position: 'absolute' as any,
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none' as any,
+  },
   legend: { minWidth: 160, maxWidth: 280 },
   legendRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 },
   legendDot: { width: 10, height: 10, borderRadius: '50%', flexShrink: 0 },
   legendLabel: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   legendValue: { fontWeight: 600, color: '#333' },
   table: { width: '100%', borderCollapse: 'collapse' as any, fontSize: 13 },
-  th: { padding: '6px 8px', borderBottom: '2px solid #e8e8e8', textAlign: 'left' as any, fontSize: 12, color: '#666', fontWeight: 600 },
+  th: {
+    padding: '6px 8px',
+    borderBottom: '2px solid #e8e8e8',
+    textAlign: 'left' as any,
+    fontSize: 12,
+    color: '#666',
+    fontWeight: 600,
+  },
   td: { padding: '6px 8px', borderBottom: '1px solid #f0f0f0' },
-  deleteBtn: { border: 'none', background: 'transparent', cursor: 'pointer', color: '#ff4d4f', fontSize: 12, padding: 0 },
+  deleteBtn: {
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    color: '#ff4d4f',
+    fontSize: 12,
+    padding: 0,
+  },
 }
 
 const CHART_COLORS = [
@@ -82,6 +150,7 @@ const ONESQL_FIELD_MAP: Record<string, string> = {
   assignee: 'field004',
   priority: 'field012',
   project_uuid: 'field006',
+  sprint: 'field011',
   created_at: 'field009',
 }
 
@@ -93,12 +162,20 @@ const FIELD_LABEL_MAP: Record<string, string> = {
   assignee: '负责人',
   priority: '优先级',
   project_uuid: '项目',
+  sprint: '所属迭代',
   created_at: '创建时间',
   count: '计数',
   total_count: '计数',
 }
 
-const LABEL_HYDRATION_DIMENSIONS = new Set(['issue_type', 'status', 'assignee', 'priority', 'project_uuid'])
+const LABEL_HYDRATION_DIMENSIONS = new Set([
+  'issue_type',
+  'status',
+  'assignee',
+  'priority',
+  'project_uuid',
+  'sprint',
+])
 const LABEL_HYDRATION_LOOKUP_LIMIT = 50
 const dimensionLabelCache = new Map<string, Map<string, string>>()
 const ISSUE_TYPE_CACHE_TTL_MS = 5 * 60 * 1000
@@ -160,7 +237,9 @@ const DEFAULT_WORKITEM_HIERARCHY = {
 }
 
 function escapeOnesqlValue(value: any): string {
-  return String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
 }
 
 function getOnesqlField(fieldKey: string): string {
@@ -265,6 +344,7 @@ function normalizeWorkitemItem(item: any): any {
     assignee: item.field004?.name || '',
     priority: item.field012?.name || '',
     project_uuid: item.field006?.uuid || '',
+    sprint: item.field011?.name || '',
     created_at: item.field009 || '',
   }
 }
@@ -333,7 +413,11 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
-async function fetchDimensionLabel(dimKey: string, dimField: string, value: string): Promise<string> {
+async function fetchDimensionLabel(
+  dimKey: string,
+  dimField: string,
+  value: string,
+): Promise<string> {
   if (!value || value === '未设置') return value
   const cache = getDimensionLabelCache(dimKey)
   const cached = cache.get(value)
@@ -374,10 +458,12 @@ async function hydrateAggregateLabels(
   ).slice(0, LABEL_HYDRATION_LOOKUP_LIMIT)
   if (values.length === 0) return aggregates
 
-  const entries = await mapWithConcurrency(values, 6, async (value) => [
-    value,
-    await fetchDimensionLabel(dimKey, dimField, value),
-  ] as [string, string])
+  const entries = await mapWithConcurrency(
+    values,
+    6,
+    async (value) =>
+      [value, await fetchDimensionLabel(dimKey, dimField, value)] as [string, string],
+  )
   const labels = new Map(entries)
   return aggregates.map((row: any) => ({
     ...row,
@@ -388,15 +474,21 @@ async function hydrateAggregateLabels(
 async function countIssues(whereClause: string, metricName: string): Promise<number> {
   const queryText = `select count() as total_count from issue${whereClause} limit 10000000000`
   const rows = await executeBrowserWorkitemsOnesql(queryText)
-  const aggregate = rows.find((r: any) => r.type === 'aggregate' || r.type === 'aggregation')?.aggregate
-    || rows.find((r: any) => r.type === 'aggregation')?.aggregation
-    || rows[0]?.aggregate
-    || rows[0]?.aggregation
-    || {}
+  const aggregate =
+    rows.find((r: any) => r.type === 'aggregate' || r.type === 'aggregation')?.aggregate ||
+    rows.find((r: any) => r.type === 'aggregation')?.aggregation ||
+    rows[0]?.aggregate ||
+    rows[0]?.aggregation ||
+    {}
   return Number(aggregate.total_count ?? aggregate[metricName] ?? aggregate.count ?? 0)
 }
 
-async function queryIssueTypeCounts(whereClause: string, metricName: string, outKey: string, startedAt: number): Promise<any> {
+async function queryIssueTypeCounts(
+  whereClause: string,
+  metricName: string,
+  outKey: string,
+  startedAt: number,
+): Promise<any> {
   const cacheKey = JSON.stringify({ whereClause, metricName, outKey })
   const cached = issueTypeCountsCache.get(cacheKey)
   const now = Date.now()
@@ -405,7 +497,10 @@ async function queryIssueTypeCounts(whereClause: string, metricName: string, out
   const issueTypes = await fetchIssueTypes()
   const total = await countIssues(whereClause, metricName)
   const typedCounts = await mapWithConcurrency(issueTypes, 8, async (issueType: any) => {
-    const typeWhereClause = appendWhereCondition(whereClause, `field007 = '${escapeOnesqlValue(issueType.uuid)}'`)
+    const typeWhereClause = appendWhereCondition(
+      whereClause,
+      `field007 = '${escapeOnesqlValue(issueType.uuid)}'`,
+    )
     return {
       name: issueType.name,
       count: await countIssues(typeWhereClause, metricName),
@@ -449,11 +544,12 @@ export async function queryBrowserWorkitemsOnesql(chartType: string, query: any)
   if (chartType === 'number' || !query.dimensions?.length) {
     const queryText = `select count() as total_count from issue${whereClause} limit 10000000000`
     const rows = await executeBrowserWorkitemsOnesql(queryText)
-    const aggregate = rows.find((r: any) => r.type === 'aggregate' || r.type === 'aggregation')?.aggregate
-      || rows.find((r: any) => r.type === 'aggregation')?.aggregation
-      || rows[0]?.aggregate
-      || rows[0]?.aggregation
-      || {}
+    const aggregate =
+      rows.find((r: any) => r.type === 'aggregate' || r.type === 'aggregation')?.aggregate ||
+      rows.find((r: any) => r.type === 'aggregation')?.aggregation ||
+      rows[0]?.aggregate ||
+      rows[0]?.aggregation ||
+      {}
     const total = Number(aggregate.total_count ?? aggregate[metricName] ?? aggregate.count ?? 0)
     return {
       rows: [{ [metricName]: total }],
@@ -464,9 +560,11 @@ export async function queryBrowserWorkitemsOnesql(chartType: string, query: any)
   }
 
   if (chartType === 'table') {
-    const queryText = `select uid(uuid, uuid as path, field001, field007.name, field005.name, field006.uuid, field009) from issue${whereClause} limit 0, ${detailLimit}`
+    const queryText = `select uid(uuid, uuid as path, field001, field007.name, field005.name, field006.uuid, field011.name, field009) from issue${whereClause} limit 0, ${detailLimit}`
     const rows = await executeBrowserWorkitemsOnesql(queryText)
-    const items = rows.filter((r: any) => r.type === 'item').map((r: any) => normalizeWorkitemItem(r.item || {}))
+    const items = rows
+      .filter((r: any) => r.type === 'item')
+      .map((r: any) => normalizeWorkitemItem(r.item || {}))
     return {
       rows: items,
       total: items.length,
@@ -488,7 +586,8 @@ export async function queryBrowserWorkitemsOnesql(chartType: string, query: any)
   const rawAggregates = rows
     .flatMap((r: any) => {
       if (Array.isArray(r.group_aggregate)) return r.group_aggregate
-      if (r.type === 'aggregate' || r.type === 'aggregation') return [r.aggregate || r.aggregation || {}]
+      if (r.type === 'aggregate' || r.type === 'aggregation')
+        return [r.aggregate || r.aggregation || {}]
       return []
     })
     .map((r: any) => ({
@@ -586,13 +685,31 @@ export const ChartCard: React.FC<Props> = ({
     } finally {
       setLoading(false)
     }
-  }, [card.chart_type, card.dataset_uuid, editable, query, snapshotData, snapshotError, snapshotStatus])
+  }, [
+    card.chart_type,
+    card.dataset_uuid,
+    editable,
+    query,
+    snapshotData,
+    snapshotError,
+    snapshotStatus,
+  ])
 
-  useEffect(() => { loadData() }, [card.card_uuid, loadData])
+  useEffect(() => {
+    loadData()
+  }, [card.card_uuid, loadData])
 
   function renderChart() {
     if (loading) return <div style={S.loading}>加载中...</div>
-    if (error) return <div style={S.error}>{error}<button style={S.retryBtn} onClick={loadData}>重试</button></div>
+    if (error)
+      return (
+        <div style={S.error}>
+          {error}
+          <button style={S.retryBtn} onClick={loadData}>
+            重试
+          </button>
+        </div>
+      )
     if (!editable && snapshotStatus !== 'success') return <div style={S.empty}>尚未刷新</div>
     if (!data?.rows || data.rows.length === 0) return <div style={S.empty}>暂无数据</div>
 
@@ -603,7 +720,9 @@ export const ChartCard: React.FC<Props> = ({
       const total = rows.length > 0 ? (Object.values(rows[0])[0] as any) : 0
       return (
         <div>
-          <div style={S.numberValue}>{typeof total === 'number' ? total.toLocaleString() : total}</div>
+          <div style={S.numberValue}>
+            {typeof total === 'number' ? total.toLocaleString() : total}
+          </div>
           <div style={S.numberLabel}>{query.metrics?.[0]?.name || '计数'}</div>
         </div>
       )
@@ -618,9 +737,16 @@ export const ChartCard: React.FC<Props> = ({
         <div>
           {visibleRows.map((r: any, i: number) => (
             <div key={i} style={S.barRow}>
-              <div style={S.barLabel} title={String(r[dimKey] || '-')}>{String(r[dimKey] || '-')}</div>
+              <div style={S.barLabel} title={String(r[dimKey] || '-')}>
+                {String(r[dimKey] || '-')}
+              </div>
               <div style={S.barTrack}>
-                <div style={{ ...S.barFill, width: `${((Number(r[metricKey]) || 0) / maxVal) * 100}%` }} />
+                <div
+                  style={{
+                    ...S.barFill,
+                    width: `${((Number(r[metricKey]) || 0) / maxVal) * 100}%`,
+                  }}
+                />
               </div>
               <div style={S.barValue}>{Number(r[metricKey]) || 0}</div>
             </div>
@@ -634,18 +760,20 @@ export const ChartCard: React.FC<Props> = ({
       const metricKey = query.metrics?.[0]?.name || 'count'
       const visibleRows = rows.slice(0, getDisplayLimit(query, chartType, 8))
       const total = rows.reduce((sum: number, r: any) => sum + (Number(r[metricKey]) || 0), 0)
-      const visibleTotal = visibleRows.reduce((sum: number, r: any) => sum + (Number(r[metricKey]) || 0), 0)
+      const visibleTotal = visibleRows.reduce(
+        (sum: number, r: any) => sum + (Number(r[metricKey]) || 0),
+        0,
+      )
       const otherTotal = Math.max(total - visibleTotal, 0)
       if (total <= 0) return <div style={S.empty}>暂无数据</div>
 
       let cursor = 0
-      const gradientParts = visibleRows
-        .map((r: any, i: number) => {
-          const value = Number(r[metricKey]) || 0
-          const start = cursor
-          cursor += (value / total) * 100
-          return `${CHART_COLORS[i % CHART_COLORS.length]} ${start}% ${cursor}%`
-        })
+      const gradientParts = visibleRows.map((r: any, i: number) => {
+        const value = Number(r[metricKey]) || 0
+        const start = cursor
+        cursor += (value / total) * 100
+        return `${CHART_COLORS[i % CHART_COLORS.length]} ${start}% ${cursor}%`
+      })
       if (otherTotal > 0 && cursor < 100) gradientParts.push(`#f0f0f0 ${cursor}% 100%`)
       const gradient = gradientParts.join(', ')
 
@@ -670,9 +798,15 @@ export const ChartCard: React.FC<Props> = ({
               const percent = total > 0 ? Math.round((value / total) * 100) : 0
               return (
                 <div key={i} style={S.legendRow}>
-                  <span style={{ ...S.legendDot, background: CHART_COLORS[i % CHART_COLORS.length] }} />
-                  <span style={S.legendLabel} title={String(r[dimKey] || '-')}>{String(r[dimKey] || '-')}</span>
-                  <span style={S.legendValue}>{value} ({percent}%)</span>
+                  <span
+                    style={{ ...S.legendDot, background: CHART_COLORS[i % CHART_COLORS.length] }}
+                  />
+                  <span style={S.legendLabel} title={String(r[dimKey] || '-')}>
+                    {String(r[dimKey] || '-')}
+                  </span>
+                  <span style={S.legendValue}>
+                    {value} ({percent}%)
+                  </span>
                 </div>
               )
             })}
@@ -680,7 +814,9 @@ export const ChartCard: React.FC<Props> = ({
               <div style={S.legendRow}>
                 <span style={{ ...S.legendDot, background: '#f0f0f0' }} />
                 <span style={S.legendLabel}>其他</span>
-                <span style={S.legendValue}>{otherTotal} ({Math.round((otherTotal / total) * 100)}%)</span>
+                <span style={S.legendValue}>
+                  {otherTotal} ({Math.round((otherTotal / total) * 100)}%)
+                </span>
               </div>
             )}
           </div>
@@ -694,10 +830,24 @@ export const ChartCard: React.FC<Props> = ({
       return (
         <div style={{ overflowX: 'auto' }}>
           <table style={S.table}>
-            <thead><tr>{cols.map((c) => <th key={c} style={S.th}>{FIELD_LABEL_MAP[c] || c}</th>)}</tr></thead>
+            <thead>
+              <tr>
+                {cols.map((c) => (
+                  <th key={c} style={S.th}>
+                    {FIELD_LABEL_MAP[c] || c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
             <tbody>
               {visibleRows.map((r: any, i: number) => (
-                <tr key={i}>{cols.map((c) => <td key={c} style={S.td}>{String(r[c] ?? '-')}</td>)}</tr>
+                <tr key={i}>
+                  {cols.map((c) => (
+                    <td key={c} style={S.td}>
+                      {String(r[c] ?? '-')}
+                    </td>
+                  ))}
+                </tr>
               ))}
             </tbody>
           </table>
@@ -717,16 +867,20 @@ export const ChartCard: React.FC<Props> = ({
         <span style={S.cardTitle}>{card.title}</span>
         {editable && (
           <div style={S.headerActions} onMouseDown={(e) => e.stopPropagation()}>
-            <button style={S.actionBtn} onClick={loadData} disabled={loading}>刷新</button>
-            <button style={S.actionBtn} onClick={onCopy}>复制</button>
-            <button style={S.deleteBtn} onClick={onDelete}>删除</button>
+            <button style={S.actionBtn} onClick={loadData} disabled={loading}>
+              刷新
+            </button>
+            <button style={S.actionBtn} onClick={onCopy}>
+              复制
+            </button>
+            <button style={S.deleteBtn} onClick={onDelete}>
+              删除
+            </button>
           </div>
         )}
       </div>
       <div style={S.cardBody}>
-        <div style={getChartViewportStyle(card.chart_type)}>
-          {renderChart()}
-        </div>
+        <div style={getChartViewportStyle(card.chart_type)}>{renderChart()}</div>
       </div>
     </div>
   )

@@ -247,6 +247,7 @@ const FIELD_LABELS: Record<string, string> = {
   assignee: '负责人',
   priority: '优先级',
   project_uuid: '项目',
+  sprint: '所属迭代',
   created_at: '创建时间',
 }
 
@@ -681,7 +682,7 @@ const App: React.FC = () => {
         history: nextMessages,
       })
       const result = res.data || {}
-      const draft = result.status === 'ready' ? result.draft : null
+      const draft = result.status === 'ready' ? result.draft : aiDraft
       const assistantText =
         result.reply ||
         (draft ? '已整理出报表配置草稿，请确认是否添加。' : '我需要继续确认报表需求。')
