@@ -195,6 +195,15 @@ const S: any = {
     color: '#4e5969',
     background: '#fafafa',
   },
+  dialogMsg: {
+    margin: '0 22px 10px',
+    padding: '8px 10px',
+    borderRadius: 6,
+    background: '#fff2f0',
+    border: '1px solid #ffccc7',
+    color: '#cf1322',
+    fontSize: 12,
+  },
   statusPill: { fontSize: 12, color: '#86909c', marginRight: 8 },
   sendBtn: {
     padding: '7px 16px',
@@ -335,12 +344,15 @@ const AiReportDialogContent: React.FC<any> = ({
   aiImage,
   aiMessages,
   aiPrompt,
+  aiError,
   setAiDraft,
   setAiImage,
   setAiMessages,
   setAiPrompt,
+  setAiError,
   handleGenerateDraft,
   handleCreateFromDraft,
+  handleResetAiSession,
   handlePickImage,
   handlePasteImage,
   onCancel,
@@ -362,6 +374,7 @@ const AiReportDialogContent: React.FC<any> = ({
           关闭
         </button>
       </div>
+      {aiError && <div style={S.dialogMsg}>{aiError}</div>}
       <div style={S.chatStream}>
         {aiMessages.length === 0 && (
           <div style={S.chatMsgWrap('assistant')}>
@@ -377,7 +390,9 @@ const AiReportDialogContent: React.FC<any> = ({
               {item.content}
               {(item.images || []).map((image: any, imageIndex: number) => (
                 <span key={`${index}-${imageIndex}`}>
-                  <img src={image.data_url} alt={image.name || '图片'} style={S.chatImage} />
+                  {image.data_url && (
+                    <img src={image.data_url} alt={image.name || '图片'} style={S.chatImage} />
+                  )}
                   <span style={S.chatImageName}>{image.name || '图片'}</span>
                 </span>
               ))}
@@ -392,7 +407,10 @@ const AiReportDialogContent: React.FC<any> = ({
           <textarea
             style={S.composerInput}
             value={aiPrompt}
-            onChange={(e) => setAiPrompt(e.target.value)}
+            onChange={(e) => {
+              setAiPrompt(e.target.value)
+              setAiError('')
+            }}
             onPaste={handlePasteImage}
             placeholder={aiDraft ? '继续输入调整指令...' : '输入报表卡片需求，或直接粘贴截图...'}
           />
@@ -428,15 +446,7 @@ const AiReportDialogContent: React.FC<any> = ({
             <div>
               <span style={S.statusPill}>{statusText}</span>
               {aiDraft && (
-                <button
-                  style={{ ...S.btn(false), marginRight: 8 }}
-                  onClick={() => {
-                    setAiDraft(null)
-                    setAiMessages([])
-                    setAiPrompt('')
-                    setAiImage(null)
-                  }}
-                >
+                <button style={{ ...S.btn(false), marginRight: 8 }} onClick={handleResetAiSession}>
                   重新开始
                 </button>
               )}
@@ -464,6 +474,7 @@ const App: React.FC = () => {
   const [aiImage, setAiImage] = useState<any>(null)
   const [aiDraft, setAiDraft] = useState<any>(null)
   const [aiMessages, setAiMessages] = useState<any[]>([])
+  const [aiError, setAiError] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
 
   async function loadList() {
@@ -482,12 +493,40 @@ const App: React.FC = () => {
     loadList()
   }, [])
 
-  function openAiReport() {
+  async function saveAiSession(messages: any[], draft: any) {
+    if (!currentUuid) return
+    try {
+      await apiPost(`/bi/dashboard/${currentUuid}/ai/session`, { messages, draft })
+    } catch {
+      /* 会话保存失败不阻塞主流程 */
+    }
+  }
+
+  async function openAiReport() {
     setAiPrompt('')
     setAiImage(null)
     setAiDraft(null)
     setAiMessages([])
+    setAiError('')
     setShowAiReport(true)
+    if (!currentUuid) return
+    try {
+      const res = await apiGet(`/bi/dashboard/${currentUuid}/ai/session`)
+      const session = res.data || {}
+      setAiMessages(Array.isArray(session.messages) ? session.messages : [])
+      setAiDraft(session.draft || null)
+    } catch (e: any) {
+      setAiError(e.message || '加载历史对话失败')
+    }
+  }
+
+  async function handleResetAiSession() {
+    setAiDraft(null)
+    setAiMessages([])
+    setAiPrompt('')
+    setAiImage(null)
+    setAiError('')
+    await saveAiSession([], null)
   }
 
   async function handleCreate() {
@@ -543,12 +582,12 @@ const App: React.FC = () => {
   async function handleGenerateDraft() {
     const requestImage = aiImage
     if (!aiPrompt.trim() && !requestImage?.data_url) {
-      setMsg(aiDraft ? '请输入调整指令或添加图片' : '请输入报表需求或添加图片')
+      setAiError(aiDraft ? '请输入调整指令或添加图片' : '请输入报表需求或添加图片')
       return
     }
     const userText = aiPrompt.trim() || '请分析这张图片里的报表需求'
     setAiBusy(true)
-    setMsg('')
+    setAiError('')
     const userMessage = {
       role: 'user',
       content: userText,
@@ -570,8 +609,7 @@ const App: React.FC = () => {
       const assistantText =
         result.reply ||
         (draft ? '已整理出报表配置草稿，请确认是否添加。' : '我需要继续确认报表需求。')
-      setAiDraft(draft)
-      setAiMessages([
+      const savedMessages = [
         ...nextMessages,
         {
           role: 'assistant',
@@ -580,9 +618,25 @@ const App: React.FC = () => {
           confirmed: result.confirmed || {},
           missing: result.missing || [],
         },
-      ])
+      ]
+      setAiDraft(draft)
+      setAiMessages(savedMessages)
+      await saveAiSession(savedMessages, draft)
     } catch (e: any) {
-      setMsg(e.message || '生成报表草稿失败')
+      const errorText = e.message || '生成报表草稿失败'
+      const failedMessages = [
+        ...nextMessages,
+        {
+          role: 'assistant',
+          content: `这次请求没有成功：${errorText}\n可以直接继续补充需求，或稍后重试。`,
+          thinking_summary: 'AI 服务调用失败，当前对话内容已保留，未生成新的报表配置。',
+          confirmed: {},
+          missing: ['需要重新发送或补充需求'],
+        },
+      ]
+      setAiError(errorText)
+      setAiMessages(failedMessages)
+      await saveAiSession(failedMessages, aiDraft)
     } finally {
       setAiBusy(false)
     }
@@ -598,9 +652,11 @@ const App: React.FC = () => {
       setAiMessages([])
       setAiPrompt('')
       setAiImage(null)
+      setAiError('')
+      await saveAiSession([], null)
       setDetailReloadToken((value) => value + 1)
     } catch (e: any) {
-      setMsg(e.message || '添加 AI 卡片失败')
+      setAiError(e.message || '添加 AI 卡片失败')
     } finally {
       setAiBusy(false)
     }
@@ -627,12 +683,15 @@ const App: React.FC = () => {
                 aiImage={aiImage}
                 aiMessages={aiMessages}
                 aiPrompt={aiPrompt}
+                aiError={aiError}
                 setAiDraft={setAiDraft}
                 setAiImage={setAiImage}
                 setAiMessages={setAiMessages}
                 setAiPrompt={setAiPrompt}
+                setAiError={setAiError}
                 handleGenerateDraft={handleGenerateDraft}
                 handleCreateFromDraft={handleCreateFromDraft}
+                handleResetAiSession={handleResetAiSession}
                 handlePickImage={handlePickImage}
                 handlePasteImage={handlePasteImage}
                 onCancel={() => setShowAiReport(false)}

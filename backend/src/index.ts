@@ -319,12 +319,33 @@ function requestJson(urlText: string, apiKey: string, body: any): Promise<any> {
 function extractJsonObject(text: string): any {
   const raw = String(text || '').trim()
   if (!raw) throw new Error('AI 返回为空')
+  const parseLoose = (value: string) => {
+    const repaired = value
+      .replace(/^```(?:json)?/i, '')
+      .replace(/```$/i, '')
+      .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
+      .replace(/,\s*([}\]])/g, '$1')
+      .trim()
+    return JSON.parse(repaired)
+  }
   try {
     return JSON.parse(raw)
   } catch {
     const start = raw.indexOf('{')
     const end = raw.lastIndexOf('}')
-    if (start >= 0 && end > start) return JSON.parse(raw.slice(start, end + 1))
+    if (start >= 0 && end > start) {
+      const objectText = raw.slice(start, end + 1)
+      try {
+        return JSON.parse(objectText)
+      } catch {
+        return parseLoose(objectText)
+      }
+    }
+    try {
+      return parseLoose(raw)
+    } catch {
+      /* throw below */
+    }
     throw new Error(`AI 返回不是合法 JSON: ${raw.slice(0, 300)}`)
   }
 }
@@ -444,6 +465,45 @@ function sanitizeAiDialogResult(input: any): any {
     confirmed,
     missing,
     draft,
+  }
+}
+
+function sanitizeAiReportSession(input: any): any {
+  const messages = Array.isArray(input?.messages)
+    ? input.messages
+        .slice(-16)
+        .map((item: any) => ({
+          role: item?.role === 'assistant' ? 'assistant' : 'user',
+          content: String(item?.content || '').slice(0, 1200),
+          thinking_summary: String(item?.thinking_summary || '').slice(0, 1000),
+          confirmed:
+            item?.confirmed && typeof item.confirmed === 'object'
+              ? {
+                  data_scope: String(item.confirmed.data_scope || '').slice(0, 300),
+                  chart_type: String(item.confirmed.chart_type || '').slice(0, 200),
+                  metrics: String(item.confirmed.metrics || '').slice(0, 300),
+                  dimensions: String(item.confirmed.dimensions || '').slice(0, 300),
+                  filters: String(item.confirmed.filters || '').slice(0, 300),
+                }
+              : {},
+          missing: Array.isArray(item?.missing)
+            ? item.missing.map((value: any) => String(value || '').slice(0, 200)).slice(0, 6)
+            : [],
+          images: Array.isArray(item?.images)
+            ? item.images
+                .map((image: any) => ({
+                  name: String(image?.name || '图片').slice(0, 200),
+                  mime_type: String(image?.mime_type || '').slice(0, 100),
+                }))
+                .slice(0, 4)
+            : [],
+        }))
+        .filter((item: any) => item.content || item.images.length > 0)
+    : []
+  return {
+    messages,
+    draft: input?.draft ? sanitizeReportDraft(input.draft) : null,
+    updated_at: Number(input?.updated_at || 0),
   }
 }
 
@@ -654,7 +714,22 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
       },
     )
     const text = json?.choices?.[0]?.message?.content || ''
-    const result = sanitizeAiDialogResult(extractJsonObject(text))
+    let result: any
+    try {
+      result = sanitizeAiDialogResult(extractJsonObject(text))
+    } catch (parseError: any) {
+      Logger.error('[BI] AI JSON parse failed:', parseError?.message || parseError)
+      result = sanitizeAiDialogResult({
+        status: 'clarifying',
+        reply:
+          '我收到了你的需求，但这次模型返回的配置格式不完整。请直接继续确认或重发一句完整需求，我会继续整理报表配置。',
+        thinking_summary:
+          'AI 已收到当前对话上下文，但返回内容未能转换为插件支持的结构化报表配置，因此保留对话并等待继续确认。',
+        confirmed: {},
+        missing: ['需要重新确认完整报表需求'],
+        draft: null,
+      })
+    }
     return { body: { data: result } }
   } catch (e: any) {
     Logger.error('[BI] generateReportDraft failed:', e?.message || e)
@@ -741,6 +816,44 @@ export async function createReportFromDraft(req: any): Promise<PluginResponse> {
     card_count: cards.length,
   })
   return { body: { data: { dashboard_uuid: uuid, name: draft.title, card_count: cards.length } } }
+}
+
+export async function getAiReportSession(req: any): Promise<PluginResponse> {
+  const teamUUID = getParam(req, 'teamUUID')
+  const dashboardUuid = getParam(req, 'dashboardUUID')
+  if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
+  const d = (await dashboardEntity.get(dashboardUuid)) as any
+  if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
+  if (d.team_uuid !== teamUUID) return { body: { error: '仪表盘不属于当前团队' }, statusCode: 403 }
+  const config = safeJsonParse(d.config_json, {})
+  return { body: { data: sanitizeAiReportSession(config.ai_report_session || {}) } }
+}
+
+export async function saveAiReportSession(req: any): Promise<PluginResponse> {
+  const teamUUID = getParam(req, 'teamUUID')
+  const dashboardUuid = getParam(req, 'dashboardUUID')
+  if (!dashboardUuid) return { body: { error: '缺少 dashboard_uuid' }, statusCode: 400 }
+  const d = (await dashboardEntity.get(dashboardUuid)) as any
+  if (!d) return { body: { error: '仪表盘不存在' }, statusCode: 404 }
+  if (d.team_uuid !== teamUUID) return { body: { error: '仪表盘不属于当前团队' }, statusCode: 403 }
+  const session = sanitizeAiReportSession({ ...(req.body || {}), updated_at: Date.now() })
+  const config = {
+    ...safeJsonParse(d.config_json, {}),
+    ai_report_session: session,
+  }
+  const fallbackConfig = {
+    ...config,
+    ai_report_session: { messages: [], draft: null, updated_at: session.updated_at },
+  }
+  await dashboardEntity.set(
+    dashboardUuid,
+    cleanForSet({
+      ...d,
+      config_json: jsonText(config, 32768, fallbackConfig),
+      updated_at: Date.now(),
+    }),
+  )
+  return { body: { data: session } }
 }
 
 export async function listDashboardSnapshots(req: any): Promise<PluginResponse> {
