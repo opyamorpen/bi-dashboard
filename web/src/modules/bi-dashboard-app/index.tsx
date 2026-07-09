@@ -651,6 +651,12 @@ const DraftConfirmCard: React.FC<any> = ({
         <div>{cardCount} 张卡片，添加到当前仪表盘</div>
         <div style={S.miniLabel}>数据范围</div>
         <div>{formatDraftValue(draft.data_scope, '默认工作项数据集')}</div>
+        {draft.description && (
+          <>
+            <div style={S.miniLabel}>配置说明</div>
+            <div>{draft.description}</div>
+          </>
+        )}
         <div style={S.miniLabel}>筛选条件</div>
         <div>{formatFilters(draft.filters || [])}</div>
       </div>

@@ -23,6 +23,8 @@ const DEFAULT_AI_SKILL_PROMPT = [
   '你是 ONES 报表需求分析助手，需要通过多轮对话帮助用户澄清固定报表卡片配置。',
   '每轮先判断需求是否足够生成报表配置。',
   '必须确认或推断这些信息：数据范围、图表类型、分析指标、分析维度、筛选条件、卡片标题。',
+  '当前插件只能落库固定卡片 schema：图表类型 number/bar/pie/donut/table；指标只支持 count/count_distinct；每张卡片最多 1 个维度，不支持堆叠系列维度、双轴、多指标和自定义 SQL。',
+  '如果用户需求包含堆叠柱状图、图例系列或第二维度，应先降级为当前支持的单维度图表，reply 中用业务语言说明“先生成可落库的单维度卡片”。',
   '默认只生成 1 张报表卡片；只有用户明确要求多个图表、多张卡片或同时添加多个分析项时，draft.cards 才能包含多张卡片。',
   '如果信息不足，status 返回 clarifying，并用 reply 继续追问最关键的 1-3 个问题。',
   '如果信息足够，status 返回 ready，reply 用自然语言总结需求，draft 返回完整 ReportDraft。',
@@ -63,6 +65,20 @@ const DEFAULT_ISSUE_FIELDS = [
   { key: 'sprint', label: '所属迭代', type: 'text', dimension: true, metric: false },
   { key: 'created_at', label: '创建时间', type: 'datetime', dimension: true, metric: false },
 ]
+const FIELD_LABELS: Record<string, string> = DEFAULT_ISSUE_FIELDS.reduce(
+  (map: Record<string, string>, field: any) => {
+    map[field.key] = field.label
+    return map
+  },
+  {},
+)
+const CHART_TYPE_LABELS: Record<string, string> = {
+  number: '数字指标卡',
+  bar: '柱状图',
+  pie: '饼图',
+  donut: '环形图',
+  table: '明细表格',
+}
 const CHART_TYPE_OPTIONS = [
   { value: 'number', label: '数字指标卡', requires_dimension: false, default_limit: 100 },
   { value: 'bar', label: '柱状图', requires_dimension: true, default_limit: 15 },
@@ -575,6 +591,179 @@ function cloneDraft(draft: any): any {
   return JSON.parse(JSON.stringify(draft || {}))
 }
 
+function getFieldLabel(fieldKey: string): string {
+  return FIELD_LABELS[fieldKey] || fieldKey
+}
+
+function inferDimensionFromText(text: string): any | null {
+  if (/所属?迭代|迭代|sprint/i.test(text)) return { field_key: 'sprint', name: '所属迭代' }
+  if (/负责人|处理人|经办人|assignee|owner/i.test(text))
+    return { field_key: 'assignee', name: '负责人' }
+  if (/状态|status/i.test(text)) return { field_key: 'status', name: '状态' }
+  if (/优先级|priority/i.test(text)) return { field_key: 'priority', name: '优先级' }
+  if (/项目|project/i.test(text)) return { field_key: 'project_uuid', name: '项目' }
+  if (/工作项类型|事项类型|类型|issue[_ -]?type/i.test(text))
+    return { field_key: 'issue_type', name: '工作项类型' }
+  if (/创建时间|创建日期|created/i.test(text)) return { field_key: 'created_at', name: '创建时间' }
+  return null
+}
+
+function inferChartTypeFromText(text: string, dimension: any): string {
+  if (/环形图|环图|donut/i.test(text)) return dimension ? 'donut' : 'number'
+  if (/饼图|pie/i.test(text)) return dimension ? 'pie' : 'number'
+  if (/表格|明细|table/i.test(text)) return 'table'
+  if (/数字|指标卡|总数|number/i.test(text) && !/横轴|按.+分布|柱/.test(text)) return 'number'
+  if (/柱状图|柱图|堆叠|横轴|纵轴|分布|bar/i.test(text)) return dimension ? 'bar' : 'number'
+  return dimension ? 'bar' : 'number'
+}
+
+function inferFiltersFromText(text: string): any[] {
+  const filters: any[] = []
+  if (/工作项类型|事项类型|issue[_ -]?type|缺陷|bug/i.test(text)) {
+    const issueTypeMatch = text.match(
+      /(?:工作项类型|事项类型|issue[_ -]?type)\s*(?:是|=|为|:|：)?\s*([^\s，。；;、]+)/i,
+    )
+    const issueTypeValue = /缺陷|bug/i.test(text)
+      ? '缺陷'
+      : String(issueTypeMatch?.[1] || '').trim()
+    if (issueTypeValue) {
+      filters.push({ field_key: 'issue_type', operator: 'eq', value: issueTypeValue })
+    }
+  }
+  const statusMatch = text.match(/状态\s*(?:是|=|为|:|：)\s*([^\s，。；;、]+)/)
+  if (statusMatch?.[1]) {
+    filters.push({ field_key: 'status', operator: 'eq', value: statusMatch[1] })
+  }
+  const priorityMatch = text.match(/优先级\s*(?:是|=|为|:|：)\s*([^\s，。；;、]+)/)
+  if (priorityMatch?.[1]) {
+    filters.push({ field_key: 'priority', operator: 'eq', value: priorityMatch[1] })
+  }
+  return filters
+}
+
+function mergeDraftFilters(existingFilters: any[], nextFilters: any[]): any[] {
+  const merged = Array.isArray(existingFilters) ? existingFilters.slice() : []
+  nextFilters.forEach((filter: any) => {
+    const index = merged.findIndex(
+      (item: any) => item.field_key === filter.field_key && item.operator === filter.operator,
+    )
+    if (index >= 0) merged[index] = filter
+    else merged.push(filter)
+  })
+  return merged
+}
+
+function formatFilters(filters: any[]): string {
+  if (!Array.isArray(filters) || filters.length === 0) return '无'
+  return filters
+    .map(
+      (filter: any) =>
+        `${getFieldLabel(filter.field_key)} ${filter.operator === 'eq' ? '=' : filter.operator} ${filter.value || ''}`,
+    )
+    .join('；')
+}
+
+function hasUnsupportedSeriesNeed(text: string): boolean {
+  return /堆叠|叠加|系列|图例|第二维度|严重程度|severity/i.test(text)
+}
+
+function buildSupportedDraftFromConversation(
+  currentDraft: any,
+  prompt: string,
+  historyText: string,
+): any | null {
+  const directText = String(prompt || '')
+  const combinedText = `${historyText || ''}\n${directText}`.trim()
+  const dimension = inferDimensionFromText(directText) || inferDimensionFromText(combinedText)
+  const filters = inferFiltersFromText(combinedText)
+  const chartType = inferChartTypeFromText(combinedText, dimension)
+  const hasActionableIntent =
+    Boolean(currentDraft) ||
+    Boolean(dimension) ||
+    filters.length > 0 ||
+    /总数|数量|统计|分布|缺陷|bug/i.test(combinedText)
+  if (!hasActionableIntent) return null
+
+  const next = currentDraft
+    ? cloneDraft(currentDraft)
+    : {
+        title: '',
+        description: '',
+        data_scope: { dataset: 'work_item' },
+        filters: [],
+        cards: [],
+      }
+  next.data_scope = next.data_scope && typeof next.data_scope === 'object' ? next.data_scope : {}
+  next.filters = mergeDraftFilters(next.filters, filters)
+
+  const safeChartType =
+    ['pie', 'donut', 'bar'].includes(chartType) && !dimension ? 'number' : chartType
+  const metric = { name: '工作项数量', aggregation: 'count', field_key: 'uuid' }
+  const cardTitle =
+    next.cards?.[0]?.title ||
+    (filters.some(
+      (filter: any) => filter.field_key === 'issue_type' && /缺陷|bug/i.test(String(filter.value)),
+    )
+      ? dimension
+        ? `缺陷按${dimension.name}分布`
+        : '缺陷数量'
+      : dimension
+        ? `工作项按${dimension.name}分布`
+        : '工作项总数')
+  const descriptionParts = [
+    'AI 已将需求映射为当前插件支持的固定卡片配置。',
+    hasUnsupportedSeriesNeed(combinedText)
+      ? '原需求包含堆叠/系列维度，当前先降级为可落库的单维度图表。'
+      : '',
+  ].filter(Boolean)
+  next.title = next.title || cardTitle
+  next.description = descriptionParts.join(' ')
+  next.cards = [
+    {
+      ...(Array.isArray(next.cards) && next.cards[0] ? next.cards[0] : {}),
+      title: cardTitle,
+      chart_type: safeChartType,
+      metric,
+      dimension: safeChartType === 'number' ? undefined : dimension || undefined,
+      limit: safeChartType === 'table' ? 50 : 15,
+      layout: sanitizeLayout(next.cards?.[0]?.layout, 0, safeChartType),
+    },
+  ]
+  return sanitizeReportDraft(next)
+}
+
+function createSupportedDraftDialogResult(draft: any, prompt: string, historyText: string): any {
+  const card = draft.cards?.[0] || {}
+  const dimension = card.dimension?.field_key ? getFieldLabel(card.dimension.field_key) : '无'
+  const chartType = CHART_TYPE_LABELS[card.chart_type] || card.chart_type || '数字指标卡'
+  const filters = formatFilters(draft.filters || [])
+  const downgraded = hasUnsupportedSeriesNeed(`${historyText || ''}\n${prompt || ''}`)
+  return {
+    status: 'ready',
+    reply: downgraded
+      ? `我已先按当前插件支持范围生成可落库的单维度卡片：${card.title}。原图里的堆叠/系列维度暂不直接落库，后续可以再拆一张“按严重程度分布”的卡片。`
+      : `我已按当前插件支持范围生成可落库的卡片配置：${card.title}。请确认是否添加到当前仪表盘。`,
+    thinking_summary: [
+      '已把用户需求映射为固定报表卡片 schema。',
+      `图表类型：${chartType}；指标：工作项数量；维度：${dimension}；筛选：${filters}。`,
+      downgraded
+        ? '检测到堆叠/系列维度诉求，当前版本降级为单维度图表，避免生成无法落库的配置。'
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    confirmed: {
+      data_scope: '工作项',
+      chart_type: chartType,
+      metrics: '工作项数量',
+      dimensions: dimension,
+      filters,
+    },
+    missing: [],
+    draft,
+  }
+}
+
 function applySimpleDraftInstruction(currentDraft: any, prompt: string): any | null {
   if (!currentDraft) return null
   const text = String(prompt || '')
@@ -974,6 +1163,9 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
     '你只能返回严格 JSON，不要返回 Markdown，不要解释。',
     '返回结构必须是 {"status":"clarifying|ready","reply":"展示给用户看的中文回复","thinking_summary":"面向用户的分析摘要，不是内部推理链","confirmed":{"data_scope":"...","chart_type":"...","metrics":"...","dimensions":"...","filters":"..."},"missing":["..."],"draft":null|ReportDraft}。',
     'ReportDraft 结构必须是 {title,description,data_scope,filters,cards}。',
+    'filters 只能是数组，元素结构为 {field_key, operator, value}。例如工作项类型=缺陷必须输出 {"field_key":"issue_type","operator":"eq","value":"缺陷"}。',
+    'cards 只能是数组，元素结构为 {title,chart_type,metric,dimension,limit,layout}。metric 结构为 {name,aggregation,field_key}；dimension 结构为 {field_key,name}。',
+    '当前不支持 series_dimension、stack、stacked、legend_dimension、第二维度、多指标、多 Y 轴。遇到堆叠柱状图需求时，必须降级为 chart_type=bar，并只保留横轴/主维度。',
     '用户没有明确要求多个图表、多张卡片或同时添加多个分析项时，draft.cards 必须只包含 1 张卡片。',
     '不要生成 SQL、ONESQL 或 JavaScript。',
     '字段只能使用: uuid,title,issue_type,status,assignee,priority,project_uuid,sprint,created_at。用户说“所属迭代”时使用 field_key=sprint。',
@@ -1047,38 +1239,45 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
       result = sanitizeAiDialogResult(extractJsonObject(text))
     } catch (parseError: any) {
       Logger.error('[BI] AI JSON parse failed:', parseError?.message || parseError)
-      const fallbackDraft = applySimpleDraftInstruction(currentDraft, prompt)
-      result = sanitizeAiDialogResult({
-        status: fallbackDraft ? 'ready' : 'clarifying',
-        reply: fallbackDraft
-          ? '已根据你的调整更新报表卡片草稿，请确认是否添加到当前仪表盘。'
-          : '我收到了你的需求，但这次模型返回的配置格式不完整。请直接继续确认或重发一句完整需求，我会继续整理报表配置。',
-        thinking_summary: fallbackDraft
-          ? '模型返回内容未能直接解析为结构化 JSON，系统已基于当前草稿和本轮明确调整指令更新插件支持的卡片配置。'
-          : 'AI 已收到当前对话上下文，但返回内容未能转换为插件支持的结构化报表配置，因此保留对话并等待继续确认。',
-        confirmed: {},
-        missing: fallbackDraft ? [] : ['需要重新确认完整报表需求'],
-        draft: fallbackDraft,
-      })
+      const fallbackDraft =
+        buildSupportedDraftFromConversation(currentDraft, prompt, historyText) ||
+        applySimpleDraftInstruction(currentDraft, prompt)
+      result = sanitizeAiDialogResult(
+        fallbackDraft
+          ? createSupportedDraftDialogResult(fallbackDraft, prompt, historyText)
+          : {
+              status: 'clarifying',
+              reply:
+                '我已经收到你的补充，但还缺少能落到卡片配置里的关键信息。请确认图表类型、指标和维度，例如“柱状图，按所属迭代统计缺陷数量”。',
+              thinking_summary:
+                '模型返回内容未能直接转换为插件支持的固定报表配置，系统已保留对话上下文，并继续用业务问题补齐配置条件。',
+              confirmed: {},
+              missing: ['图表类型', '指标', '维度或是否只看总数'],
+              draft: null,
+            },
+      )
     }
     return { body: { data: result } }
   } catch (e: any) {
     Logger.error('[BI] generateReportDraft failed:', e?.message || e)
-    const fallbackDraft = applySimpleDraftInstruction(currentDraft, prompt)
+    const fallbackDraft =
+      buildSupportedDraftFromConversation(currentDraft, prompt, historyText) ||
+      applySimpleDraftInstruction(currentDraft, prompt)
     return {
       body: {
-        data: sanitizeAiDialogResult({
-          status: fallbackDraft ? 'ready' : 'clarifying',
-          reply: fallbackDraft
-            ? '这次 AI 服务没有完整返回，但我已根据你的明确调整更新当前报表草稿，请确认配置是否符合预期。'
-            : '这次 AI 服务没有成功处理请求。你可以继续用文字补充报表的数据范围、图表类型、指标和维度，或重新发送较小的截图。',
-          thinking_summary: fallbackDraft
-            ? 'AI 服务调用失败后，系统基于当前草稿和本轮明确调整指令完成了插件支持范围内的配置更新。'
-            : `AI 服务调用失败：${String(e?.message || '未知错误').slice(0, 300)}。当前对话已保留，本轮未生成新的报表配置。`,
-          confirmed: {},
-          missing: fallbackDraft ? [] : ['需要继续补充需求或重试 AI 服务'],
-          draft: fallbackDraft,
-        }),
+        data: sanitizeAiDialogResult(
+          fallbackDraft
+            ? createSupportedDraftDialogResult(fallbackDraft, prompt, historyText)
+            : {
+                status: 'clarifying',
+                reply:
+                  '这次 AI 服务没有成功处理请求。你可以继续用文字补充报表的数据范围、图表类型、指标和维度，或重新发送较小的截图。',
+                thinking_summary: `AI 服务调用失败：${String(e?.message || '未知错误').slice(0, 300)}。当前对话已保留，本轮未生成新的报表配置。`,
+                confirmed: {},
+                missing: ['需要继续补充需求或重试 AI 服务'],
+                draft: null,
+              },
+        ),
       },
     }
   }
