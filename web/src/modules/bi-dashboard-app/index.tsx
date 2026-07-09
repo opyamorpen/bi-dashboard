@@ -275,23 +275,47 @@ const S: any = {
     padding: 0,
   },
   historyPanel: {
-    margin: '0 22px 12px',
+    margin: '0 22px 14px',
     borderTop: '1px solid #f0f0f0',
-    paddingTop: 10,
+    paddingTop: 8,
+    flexShrink: 0,
   },
-  historyTitle: { fontSize: 12, color: '#86909c', marginBottom: 8 },
-  historyList: { display: 'flex', gap: 8, overflowX: 'auto' as any, paddingBottom: 2 },
+  historyToggle: {
+    width: '100%',
+    border: 'none',
+    background: 'transparent',
+    padding: '4px 0',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    cursor: 'pointer',
+    color: '#4e5969',
+    fontSize: 12,
+  },
+  historyList: {
+    display: 'grid',
+    gap: 4,
+    maxHeight: 168,
+    overflowY: 'auto' as any,
+    marginTop: 6,
+  },
   historyItem: (active: boolean) => ({
-    minWidth: 180,
-    maxWidth: 260,
-    border: active ? '1px solid #1677ff' : '1px solid #e8e8e8',
-    borderRadius: 8,
-    padding: '8px 10px',
-    background: active ? '#e6f4ff' : '#fff',
+    width: '100%',
+    border: '1px solid #eef0f3',
+    borderLeft: active ? '3px solid #1677ff' : '3px solid transparent',
+    borderRadius: 6,
+    padding: '7px 9px',
+    background: active ? '#f2f8ff' : '#fff',
     cursor: 'pointer',
     textAlign: 'left' as any,
     color: '#1f2329',
   }),
+  historyItemMain: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   historyItemTitle: {
     fontSize: 13,
     fontWeight: 600,
@@ -299,8 +323,9 @@ const S: any = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
+  historyItemCount: { fontSize: 12, color: '#86909c', flexShrink: 0 },
   historyItemMeta: {
-    marginTop: 4,
+    marginTop: 3,
     fontSize: 12,
     color: '#86909c',
     overflow: 'hidden',
@@ -843,6 +868,7 @@ const ThinkingDetails: React.FC<any> = ({ message }) => {
 const AiReportDialogContent: React.FC<any> = ({
   aiSessionUuid,
   aiHistory,
+  aiHistoryOpen,
   aiBusy,
   aiDraft,
   aiValidation,
@@ -852,6 +878,7 @@ const AiReportDialogContent: React.FC<any> = ({
   aiPrompt,
   aiError,
   setAiImage,
+  setAiHistoryOpen,
   setAiPrompt,
   setAiError,
   handleGenerateDraft,
@@ -915,28 +942,6 @@ const AiReportDialogContent: React.FC<any> = ({
         onConfirm={handleCreateFromDraft}
         onDraftChange={handleDraftChange}
       />
-      {aiHistory.length > 0 && (
-        <div style={S.historyPanel}>
-          <div style={S.historyTitle}>历史会话</div>
-          <div style={S.historyList}>
-            {aiHistory.map((session: any) => (
-              <button
-                key={session.session_uuid}
-                style={S.historyItem(session.session_uuid === aiSessionUuid)}
-                onClick={() => handleSelectAiSession(session.session_uuid)}
-                disabled={aiBusy}
-              >
-                <div style={S.historyItemTitle}>{session.title || '未命名对话'}</div>
-                <div style={S.historyItemMeta}>
-                  {session.message_count || 0} 条消息
-                  {session.has_draft ? ' / 有草稿' : ''}
-                </div>
-                {session.preview && <div style={S.historyItemMeta}>{session.preview}</div>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
       <div style={S.composer}>
         <div style={S.composerBox}>
           <textarea
@@ -992,6 +997,38 @@ const AiReportDialogContent: React.FC<any> = ({
           </div>
         </div>
       </div>
+      {aiHistory.length > 0 && (
+        <div style={S.historyPanel}>
+          <button
+            style={S.historyToggle}
+            onClick={() => setAiHistoryOpen(!aiHistoryOpen)}
+            disabled={aiBusy}
+          >
+            <span>历史会话 · {aiHistory.length} 条</span>
+            <span>{aiHistoryOpen ? '收起' : '展开'}</span>
+          </button>
+          {aiHistoryOpen && (
+            <div style={S.historyList}>
+              {aiHistory.map((session: any) => (
+                <button
+                  key={session.session_uuid}
+                  style={S.historyItem(session.session_uuid === aiSessionUuid)}
+                  onClick={() => handleSelectAiSession(session.session_uuid)}
+                  disabled={aiBusy}
+                >
+                  <div style={S.historyItemMain}>
+                    <div style={S.historyItemTitle}>{session.title || '未命名对话'}</div>
+                    <div style={S.historyItemCount}>
+                      {session.message_count || 0} 条{session.has_draft ? ' / 草稿' : ''}
+                    </div>
+                  </div>
+                  {session.preview && <div style={S.historyItemMeta}>{session.preview}</div>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </>
   )
 }
@@ -1017,6 +1054,7 @@ const App: React.FC = () => {
   const [aiMessages, setAiMessages] = useState<any[]>([])
   const [aiError, setAiError] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
+  const [aiHistoryOpen, setAiHistoryOpen] = useState(false)
 
   async function loadList() {
     setLoading(true)
@@ -1071,6 +1109,33 @@ const App: React.FC = () => {
     }
   }
 
+  function prepareAiHistoryForRequest(messages: any[], currentImageUrl?: string): any[] {
+    const retainedImageUrls = new Set(
+      currentImageUrl
+        ? []
+        : messages
+            .flatMap((item: any) => (Array.isArray(item?.images) ? item.images : []))
+            .map((image: any) => image?.data_url)
+            .filter(Boolean)
+            .slice(-1),
+    )
+    return messages.slice(-10).map((item: any) => {
+      const images = Array.isArray(item?.images)
+        ? item.images
+            .filter((image: any) => image?.data_url && retainedImageUrls.has(image.data_url))
+            .slice(-1)
+        : []
+      return {
+        role: item?.role === 'assistant' ? 'assistant' : 'user',
+        content: String(item?.content || '').slice(0, 1200),
+        thinking_summary: String(item?.thinking_summary || '').slice(0, 1000),
+        confirmed: item?.confirmed || {},
+        missing: Array.isArray(item?.missing) ? item.missing.slice(0, 6) : [],
+        images,
+      }
+    })
+  }
+
   async function openAiReport() {
     const sessionUuid = makeAiSessionUuid()
     setAiSessionUuid(sessionUuid)
@@ -1080,6 +1145,7 @@ const App: React.FC = () => {
     setAiValidation(null)
     setAiMessages([])
     setAiError('')
+    setAiHistoryOpen(false)
     setShowAiReport(true)
     if (!currentUuid) return
     try {
@@ -1100,6 +1166,7 @@ const App: React.FC = () => {
     setAiPrompt('')
     setAiImage(null)
     setAiError('')
+    setAiHistoryOpen(false)
   }
 
   function handleSelectAiSession(sessionUuid: string) {
@@ -1112,6 +1179,7 @@ const App: React.FC = () => {
     setAiPrompt('')
     setAiImage(null)
     setAiError('')
+    setAiHistoryOpen(false)
   }
 
   async function handleCreate() {
@@ -1145,13 +1213,69 @@ const App: React.FC = () => {
     })
   }
 
+  async function compressImageFile(file: File): Promise<any> {
+    const originalDataUrl = await fileToDataUrl(file)
+    if (!file.type.startsWith('image/') || file.type === 'image/gif') {
+      return {
+        name: file.name,
+        mime_type: file.type,
+        data_url: originalDataUrl,
+        size: file.size,
+      }
+    }
+
+    return new Promise((resolve) => {
+      const image = new Image()
+      image.onload = () => {
+        const maxSide = 1280
+        const scale = Math.min(1, maxSide / Math.max(image.width || 1, image.height || 1))
+        const width = Math.max(1, Math.round((image.width || 1) * scale))
+        const height = Math.max(1, Math.round((image.height || 1) * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          resolve({
+            name: file.name,
+            mime_type: file.type,
+            data_url: originalDataUrl,
+            size: file.size,
+          })
+          return
+        }
+        ctx.drawImage(image, 0, 0, width, height)
+        const mimeType = 'image/jpeg'
+        const compressedDataUrl = canvas.toDataURL(mimeType, 0.78)
+        const finalDataUrl =
+          compressedDataUrl.length > 0 && compressedDataUrl.length < originalDataUrl.length
+            ? compressedDataUrl
+            : originalDataUrl
+        resolve({
+          name: file.name,
+          mime_type: finalDataUrl === compressedDataUrl ? mimeType : file.type,
+          data_url: finalDataUrl,
+          size: Math.round((finalDataUrl.length * 3) / 4),
+        })
+      }
+      image.onerror = () =>
+        resolve({
+          name: file.name,
+          mime_type: file.type,
+          data_url: originalDataUrl,
+          size: file.size,
+        })
+      image.src = originalDataUrl
+    })
+  }
+
   async function handlePickImage(file?: File) {
     if (!file) {
       setAiImage(null)
       return
     }
-    const dataUrl = await fileToDataUrl(file)
-    setAiImage({ name: file.name, mime_type: file.type, data_url: dataUrl })
+    const image = await compressImageFile(file)
+    setAiImage(image)
   }
 
   async function handlePasteImage(e: React.ClipboardEvent) {
@@ -1187,7 +1311,7 @@ const App: React.FC = () => {
         prompt: userText,
         image: requestImage,
         current_draft: aiDraft,
-        history: nextMessages,
+        history: prepareAiHistoryForRequest(nextMessages, requestImage?.data_url),
       })
       const result = res.data || {}
       const draft = result.status === 'ready' ? result.draft : aiDraft
@@ -1281,6 +1405,7 @@ const App: React.FC = () => {
               <AiReportDialogContent
                 aiSessionUuid={aiSessionUuid}
                 aiHistory={aiHistory}
+                aiHistoryOpen={aiHistoryOpen}
                 aiBusy={aiBusy}
                 aiDraft={aiDraft}
                 aiValidation={aiValidation}
@@ -1290,6 +1415,7 @@ const App: React.FC = () => {
                 aiPrompt={aiPrompt}
                 aiError={aiError}
                 setAiImage={setAiImage}
+                setAiHistoryOpen={setAiHistoryOpen}
                 setAiPrompt={setAiPrompt}
                 setAiError={setAiError}
                 handleGenerateDraft={handleGenerateDraft}

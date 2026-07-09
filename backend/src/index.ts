@@ -90,6 +90,7 @@ const DEFAULT_LAYOUTS: Record<string, any> = {
   donut: { x: 0, y: 0, w: 8, h: 6, grid_size: 48 },
   table: { x: 0, y: 0, w: 8, h: 8, grid_size: 48 },
 }
+const MAX_AI_IMAGE_DATA_URL_LENGTH = 1600000
 
 const FIELD_ALIASES: Record<string, string[]> = {
   uuid: ['uuid', 'key'],
@@ -303,6 +304,23 @@ function normalizeBaseUrl(baseUrl: string): string {
     .replace(/\/+$/, '')
   if (!trimmed) return ''
   return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`
+}
+
+function sanitizeAiImageInput(image: any): any | null {
+  const dataUrl = String(image?.data_url || '')
+  if (!dataUrl || !dataUrl.startsWith('data:image/')) return null
+  if (dataUrl.length > MAX_AI_IMAGE_DATA_URL_LENGTH) {
+    return {
+      too_large: true,
+      name: String(image?.name || '图片').slice(0, 200),
+      data_url: '',
+    }
+  }
+  return {
+    name: String(image?.name || '图片').slice(0, 200),
+    mime_type: String(image?.mime_type || '').slice(0, 100),
+    data_url: dataUrl,
+  }
 }
 
 function requestJson(urlText: string, apiKey: string, body: any): Promise<any> {
@@ -928,7 +946,24 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
       statusCode: 400,
     }
   }
-  if (b.image?.data_url && !config.supports_vision) {
+  const currentImage = sanitizeAiImageInput(b.image)
+  if (currentImage?.too_large) {
+    return {
+      body: {
+        data: sanitizeAiDialogResult({
+          status: 'clarifying',
+          reply:
+            '这张图片过大，当前插件接口无法稳定处理。请重新粘贴一张更小的截图，或先用文字说明报表的数据范围、图表类型、指标和维度。',
+          thinking_summary:
+            '系统已拦截过大的图片输入，避免请求在插件运行时失败；本轮未生成新的报表配置。',
+          confirmed: {},
+          missing: ['需要重新提供较小图片或补充文字需求'],
+          draft: null,
+        }),
+      },
+    }
+  }
+  if (currentImage?.data_url && !config.supports_vision) {
     return { body: { error: '当前 AI 配置未启用图片输入' }, statusCode: 400 }
   }
 
@@ -952,8 +987,9 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
   const currentDraft = b.current_draft ? sanitizeReportDraft(b.current_draft) : null
   const historyImages = history
     .flatMap((item: any) => (Array.isArray(item?.images) ? item.images : []))
+    .map(sanitizeAiImageInput)
     .filter((image: any) => image?.data_url)
-    .slice(-4)
+    .slice(-1)
   const historyText = history
     .map((item: any) => {
       const imageCount = Array.isArray(item?.images) ? item.images.length : 0
@@ -983,11 +1019,11 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
       text: promptText,
     },
   ]
-  if (b.image?.data_url) {
-    content.push({ type: 'image_url', image_url: { url: b.image.data_url } })
+  if (currentImage?.data_url) {
+    content.push({ type: 'image_url', image_url: { url: currentImage.data_url } })
   }
   for (const image of historyImages) {
-    if (!b.image?.data_url || image.data_url !== b.image.data_url) {
+    if (!currentImage?.data_url || image.data_url !== currentImage.data_url) {
       content.push({ type: 'image_url', image_url: { url: image.data_url } })
     }
   }
@@ -1028,7 +1064,23 @@ export async function generateReportDraft(req: any): Promise<PluginResponse> {
     return { body: { data: result } }
   } catch (e: any) {
     Logger.error('[BI] generateReportDraft failed:', e?.message || e)
-    return { body: { error: e?.message || 'AI 草稿生成失败' }, statusCode: 500 }
+    const fallbackDraft = applySimpleDraftInstruction(currentDraft, prompt)
+    return {
+      body: {
+        data: sanitizeAiDialogResult({
+          status: fallbackDraft ? 'ready' : 'clarifying',
+          reply: fallbackDraft
+            ? '这次 AI 服务没有完整返回，但我已根据你的明确调整更新当前报表草稿，请确认配置是否符合预期。'
+            : '这次 AI 服务没有成功处理请求。你可以继续用文字补充报表的数据范围、图表类型、指标和维度，或重新发送较小的截图。',
+          thinking_summary: fallbackDraft
+            ? 'AI 服务调用失败后，系统基于当前草稿和本轮明确调整指令完成了插件支持范围内的配置更新。'
+            : `AI 服务调用失败：${String(e?.message || '未知错误').slice(0, 300)}。当前对话已保留，本轮未生成新的报表配置。`,
+          confirmed: {},
+          missing: fallbackDraft ? [] : ['需要继续补充需求或重试 AI 服务'],
+          draft: fallbackDraft,
+        }),
+      },
+    }
   }
 }
 
