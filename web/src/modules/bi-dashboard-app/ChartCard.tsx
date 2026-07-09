@@ -253,11 +253,21 @@ function buildWhereClause(filters: any[] = []): string {
   for (const f of filters) {
     const field = getOnesqlField(f.field_key)
     if (f.operator === 'eq') parts.push(`${field} = '${escapeOnesqlValue(f.value)}'`)
+    else if (f.operator === 'neq') parts.push(`${field} != '${escapeOnesqlValue(f.value)}'`)
     else if (f.operator === 'in') {
       const values = Array.isArray(f.value) ? f.value : []
       parts.push(`${field} IN (${values.map((v: any) => `'${escapeOnesqlValue(v)}'`).join(',')})`)
-    } else if (f.operator === 'like') {
+    } else if (f.operator === 'not_in') {
+      const values = Array.isArray(f.value) ? f.value : []
+      parts.push(
+        `${field} NOT IN (${values.map((v: any) => `'${escapeOnesqlValue(v)}'`).join(',')})`,
+      )
+    } else if (f.operator === 'like' || f.operator === 'contains') {
       parts.push(`${field} LIKE '%${escapeOnesqlValue(f.value)}%'`)
+    } else if (f.operator === 'empty') {
+      parts.push(`(${field} IS NULL OR ${field} = '')`)
+    } else if (f.operator === 'not_empty') {
+      parts.push(`(${field} IS NOT NULL AND ${field} != '')`)
     } else if (f.operator === 'gte') {
       parts.push(`${field} >= '${escapeOnesqlValue(f.value)}'`)
     } else if (f.operator === 'lte') {

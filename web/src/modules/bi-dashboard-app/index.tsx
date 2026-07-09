@@ -229,6 +229,51 @@ const S: any = {
   cardItemTitle: { fontWeight: 600, marginBottom: 6 },
   cardItemMeta: { color: '#4e5969', fontSize: 12, lineHeight: 1.6 },
   confirmActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 },
+  configRow: {
+    display: 'grid',
+    gridTemplateColumns: '110px 1fr',
+    gap: '8px 10px',
+    alignItems: 'center',
+  },
+  configInput: {
+    width: '100%',
+    boxSizing: 'border-box' as any,
+    border: '1px solid #d9d9d9',
+    borderRadius: 6,
+    padding: '6px 8px',
+    fontSize: 13,
+    background: '#fff',
+  },
+  configSelect: {
+    width: '100%',
+    boxSizing: 'border-box' as any,
+    border: '1px solid #d9d9d9',
+    borderRadius: 6,
+    padding: '6px 8px',
+    fontSize: 13,
+    background: '#fff',
+  },
+  twoCol: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
+  filterEditor: { display: 'grid', gap: 8, marginTop: 10 },
+  filterRow: { display: 'grid', gridTemplateColumns: '1fr 1fr 1.3fr auto', gap: 8 },
+  validationBox: (status: string) => ({
+    marginTop: 10,
+    padding: '8px 10px',
+    borderRadius: 6,
+    fontSize: 12,
+    lineHeight: 1.6,
+    border: status === 'error' ? '1px solid #ffccc7' : '1px solid #ffe58f',
+    background: status === 'error' ? '#fff2f0' : '#fffbe6',
+    color: status === 'error' ? '#cf1322' : '#8c6d1f',
+  }),
+  inlineBtn: {
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    color: '#1677ff',
+    fontSize: 12,
+    padding: 0,
+  },
   historyPanel: {
     margin: '0 22px 12px',
     borderTop: '1px solid #f0f0f0',
@@ -299,9 +344,122 @@ const FILTER_OPERATOR_LABELS: Record<string, string> = {
   not_empty: '不为空',
 }
 
+const DIMENSION_CHART_TYPES = new Set(['bar', 'pie', 'donut'])
+const DEFAULT_METADATA = {
+  fields: Object.entries(FIELD_LABELS).map(([key, label]) => ({
+    key,
+    label,
+    type: key === 'created_at' ? 'datetime' : 'text',
+    dimension: key !== 'uuid',
+    metric: true,
+  })),
+  chart_types: Object.entries(CHART_TYPE_LABELS).map(([value, label]) => ({
+    value,
+    label,
+    requires_dimension: DIMENSION_CHART_TYPES.has(value),
+  })),
+  aggregations: Object.entries(AGGREGATION_LABELS).map(([value, label]) => ({ value, label })),
+  filter_operators: Object.entries(FILTER_OPERATOR_LABELS).map(([value, label]) => ({
+    value,
+    label,
+    needs_value: !['empty', 'not_empty'].includes(value),
+    array_value: ['in', 'not_in'].includes(value),
+  })),
+  default_limits: { number: 100, bar: 15, pie: 8, donut: 8, table: 50 },
+  default_layouts: {
+    number: { x: 0, y: 0, w: 8, h: 4, grid_size: 48 },
+    bar: { x: 0, y: 0, w: 8, h: 8, grid_size: 48 },
+    pie: { x: 0, y: 0, w: 8, h: 6, grid_size: 48 },
+    donut: { x: 0, y: 0, w: 8, h: 6, grid_size: 48 },
+    table: { x: 0, y: 0, w: 8, h: 8, grid_size: 48 },
+  },
+}
+
 function labelOf(map: Record<string, string>, key: any, empty = '未指定'): string {
   if (key === null || key === undefined || key === '') return empty
   return map[String(key)] || String(key)
+}
+
+function getMetadataValue(metadata: any): any {
+  return {
+    ...DEFAULT_METADATA,
+    ...(metadata || {}),
+    fields: Array.isArray(metadata?.fields) ? metadata.fields : DEFAULT_METADATA.fields,
+    chart_types: Array.isArray(metadata?.chart_types)
+      ? metadata.chart_types
+      : DEFAULT_METADATA.chart_types,
+    aggregations: Array.isArray(metadata?.aggregations)
+      ? metadata.aggregations
+      : DEFAULT_METADATA.aggregations,
+    filter_operators: Array.isArray(metadata?.filter_operators)
+      ? metadata.filter_operators
+      : DEFAULT_METADATA.filter_operators,
+    default_limits: metadata?.default_limits || DEFAULT_METADATA.default_limits,
+    default_layouts: metadata?.default_layouts || DEFAULT_METADATA.default_layouts,
+  }
+}
+
+function getDefaultLimit(chartType: string, metadata: any): number {
+  return (
+    Number(getMetadataValue(metadata).default_limits?.[chartType]) ||
+    (chartType === 'table' ? 50 : 15)
+  )
+}
+
+function getDefaultLayout(chartType: string, metadata: any): any {
+  return (
+    getMetadataValue(metadata).default_layouts?.[chartType] ||
+    DEFAULT_METADATA.default_layouts[chartType as keyof typeof DEFAULT_METADATA.default_layouts] ||
+    DEFAULT_METADATA.default_layouts.bar
+  )
+}
+
+function parseFilterValue(operator: string, value: any): any {
+  if (operator === 'empty' || operator === 'not_empty') return ''
+  if (operator === 'in' || operator === 'not_in') {
+    if (Array.isArray(value)) return value
+    return String(value || '')
+      .split(/[,，、]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+  return value ?? ''
+}
+
+function validateDraftClient(draft: any, metadata: any): any {
+  if (!draft) return null
+  const meta = getMetadataValue(metadata)
+  const fields = new Set((meta.fields || []).map((field: any) => field.key))
+  const chartTypes = new Set((meta.chart_types || []).map((item: any) => item.value))
+  const aggregations = new Set((meta.aggregations || []).map((item: any) => item.value))
+  const operators = new Set((meta.filter_operators || []).map((item: any) => item.value))
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  ;(draft.filters || []).forEach((filter: any, index: number) => {
+    if (!fields.has(filter.field_key)) errors.push(`筛选条件 ${index + 1} 的字段不支持。`)
+    if (!operators.has(filter.operator)) errors.push(`筛选条件 ${index + 1} 的操作符不支持。`)
+  })
+  ;(draft.cards || []).forEach((card: any, index: number) => {
+    if (!chartTypes.has(card.chart_type)) errors.push(`卡片 ${index + 1} 的图表类型不支持。`)
+    if (!aggregations.has(card.metric?.aggregation))
+      errors.push(`卡片 ${index + 1} 的聚合方式不支持。`)
+    if (!fields.has(card.metric?.field_key)) errors.push(`卡片 ${index + 1} 的指标字段不支持。`)
+    if (DIMENSION_CHART_TYPES.has(card.chart_type) && !card.dimension?.field_key) {
+      errors.push(`卡片 ${index + 1} 需要选择分析维度。`)
+    }
+    if (card.dimension?.field_key && !fields.has(card.dimension.field_key)) {
+      errors.push(`卡片 ${index + 1} 的维度字段不支持。`)
+    }
+  })
+  if (!Array.isArray(draft.cards) || draft.cards.length === 0) warnings.push('当前草稿没有卡片。')
+  return {
+    ok: errors.length === 0,
+    status: errors.length > 0 ? 'error' : warnings.length > 0 ? 'warning' : 'ok',
+    errors,
+    warnings,
+    corrections: [],
+  }
 }
 
 function formatDraftSummary(draft: any): string {
@@ -373,16 +531,97 @@ function formatLayout(layout: any): string {
   return `${Number(layout.w) || 8} × ${Number(layout.h) || 6} 格，添加时自动避开已有卡片`
 }
 
-const DraftConfirmCard: React.FC<any> = ({ draft, aiBusy, onConfirm }) => {
+const DraftConfirmCard: React.FC<any> = ({
+  draft,
+  validation,
+  metadata,
+  aiBusy,
+  onConfirm,
+  onDraftChange,
+}) => {
   if (!draft) return null
+  const meta = getMetadataValue(metadata)
   const cards = Array.isArray(draft.cards) ? draft.cards : []
   const cardCount = Math.max(cards.length, 1)
+  const currentValidation = validation || validateDraftClient(draft, meta)
+  const hasValidationMessages =
+    currentValidation &&
+    currentValidation.status !== 'ok' &&
+    ((currentValidation.errors || []).length > 0 ||
+      (currentValidation.warnings || []).length > 0 ||
+      (currentValidation.corrections || []).length > 0)
+  const dimensionFields = meta.fields.filter((field: any) => field.dimension)
+  const metricFields = meta.fields.filter((field: any) => field.metric)
+
+  function patchDraft(patch: any) {
+    onDraftChange({ ...draft, ...patch })
+  }
+
+  function patchCard(index: number, patch: any) {
+    const nextCards = cards.map((card: any, cardIndex: number) => {
+      if (cardIndex !== index) return card
+      const next = { ...card, ...patch }
+      if (!DIMENSION_CHART_TYPES.has(next.chart_type)) delete next.dimension
+      if (!next.metric)
+        next.metric = { name: '工作项数量', aggregation: 'count', field_key: 'uuid' }
+      next.limit = Math.min(
+        Math.max(Number(next.limit) || getDefaultLimit(next.chart_type, meta), 1),
+        1000,
+      )
+      next.layout = next.layout || getDefaultLayout(next.chart_type, meta)
+      return next
+    })
+    patchDraft({ cards: nextCards })
+  }
+
+  function patchCardMetric(index: number, patch: any) {
+    const card = cards[index] || {}
+    patchCard(index, {
+      metric: {
+        name: card.metric?.name || '工作项数量',
+        aggregation: card.metric?.aggregation || 'count',
+        field_key: card.metric?.field_key || 'uuid',
+        ...patch,
+      },
+    })
+  }
+
+  function patchFilter(index: number, patch: any) {
+    const nextFilters = (draft.filters || []).map((filter: any, filterIndex: number) => {
+      if (filterIndex !== index) return filter
+      const next = { ...filter, ...patch }
+      next.value = parseFilterValue(next.operator, next.value)
+      return next
+    })
+    patchDraft({ filters: nextFilters })
+  }
+
+  function addFilter() {
+    const firstField = meta.fields.find((field: any) => field.key !== 'uuid') || meta.fields[0]
+    patchDraft({
+      filters: [
+        ...(draft.filters || []),
+        { field_key: firstField?.key || 'status', operator: 'eq', value: '' },
+      ],
+    })
+  }
+
+  function removeFilter(index: number) {
+    patchDraft({
+      filters: (draft.filters || []).filter((_: any, itemIndex: number) => itemIndex !== index),
+    })
+  }
+
   return (
     <div style={S.confirmCard}>
       <div style={S.confirmTitle}>卡片配置确认</div>
       <div style={S.confirmGrid}>
         <div style={S.miniLabel}>需求标题</div>
-        <div>{draft.title || '未命名卡片需求'}</div>
+        <input
+          style={S.configInput}
+          value={draft.title || ''}
+          onChange={(e) => patchDraft({ title: e.target.value })}
+        />
         <div style={S.miniLabel}>新增数量</div>
         <div>{cardCount} 张卡片，添加到当前仪表盘</div>
         <div style={S.miniLabel}>数据范围</div>
@@ -390,11 +629,148 @@ const DraftConfirmCard: React.FC<any> = ({ draft, aiBusy, onConfirm }) => {
         <div style={S.miniLabel}>筛选条件</div>
         <div>{formatFilters(draft.filters || [])}</div>
       </div>
+      <div style={S.filterEditor}>
+        {(draft.filters || []).map((filter: any, index: number) => {
+          const operator = meta.filter_operators.find((item: any) => item.value === filter.operator)
+          return (
+            <div key={index} style={S.filterRow}>
+              <select
+                style={S.configSelect}
+                value={filter.field_key || ''}
+                onChange={(e) => patchFilter(index, { field_key: e.target.value })}
+              >
+                {meta.fields.map((field: any) => (
+                  <option key={field.key} value={field.key}>
+                    {field.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                style={S.configSelect}
+                value={filter.operator || 'eq'}
+                onChange={(e) => patchFilter(index, { operator: e.target.value })}
+              >
+                {meta.filter_operators.map((item: any) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                style={S.configInput}
+                value={Array.isArray(filter.value) ? filter.value.join('、') : filter.value || ''}
+                disabled={operator && operator.needs_value === false}
+                onChange={(e) => patchFilter(index, { value: e.target.value })}
+              />
+              <button style={S.inlineBtn} onClick={() => removeFilter(index)}>
+                删除
+              </button>
+            </div>
+          )
+        })}
+        <div>
+          <button style={S.inlineBtn} onClick={addFilter}>
+            + 添加筛选条件
+          </button>
+        </div>
+      </div>
       <div style={S.cardList}>
         {cards.map((card: any, index: number) => (
           <div key={index} style={S.cardItem}>
-            <div style={S.cardItemTitle}>
-              {index + 1}. {card.title || `卡片 ${index + 1}`}
+            <div style={{ ...S.cardItemTitle, marginBottom: 10 }}>{index + 1}. 卡片配置</div>
+            <div style={S.configRow}>
+              <div style={S.miniLabel}>标题</div>
+              <input
+                style={S.configInput}
+                value={card.title || ''}
+                onChange={(e) => patchCard(index, { title: e.target.value })}
+              />
+              <div style={S.miniLabel}>图表类型</div>
+              <select
+                style={S.configSelect}
+                value={card.chart_type || 'number'}
+                onChange={(e) => {
+                  const nextChartType = e.target.value
+                  const firstDimension = dimensionFields[0]
+                  patchCard(index, {
+                    chart_type: nextChartType,
+                    limit: getDefaultLimit(nextChartType, meta),
+                    layout: getDefaultLayout(nextChartType, meta),
+                    dimension:
+                      DIMENSION_CHART_TYPES.has(nextChartType) && !card.dimension?.field_key
+                        ? {
+                            field_key: firstDimension?.key || '',
+                            name: firstDimension?.label || '',
+                          }
+                        : card.dimension,
+                  })
+                }}
+              >
+                {meta.chart_types.map((item: any) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <div style={S.miniLabel}>指标</div>
+              <div style={S.twoCol}>
+                <select
+                  style={S.configSelect}
+                  value={card.metric?.aggregation || 'count'}
+                  onChange={(e) => patchCardMetric(index, { aggregation: e.target.value })}
+                >
+                  {meta.aggregations.map((item: any) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  style={S.configSelect}
+                  value={card.metric?.field_key || 'uuid'}
+                  onChange={(e) => patchCardMetric(index, { field_key: e.target.value })}
+                >
+                  {metricFields.map((field: any) => (
+                    <option key={field.key} value={field.key}>
+                      {field.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={S.miniLabel}>维度</div>
+              <select
+                style={S.configSelect}
+                value={card.dimension?.field_key || ''}
+                disabled={!DIMENSION_CHART_TYPES.has(card.chart_type)}
+                onChange={(e) =>
+                  patchCard(index, {
+                    dimension: e.target.value
+                      ? {
+                          field_key: e.target.value,
+                          name:
+                            dimensionFields.find((field: any) => field.key === e.target.value)
+                              ?.label || e.target.value,
+                        }
+                      : undefined,
+                  })
+                }
+              >
+                <option value="">无</option>
+                {dimensionFields.map((field: any) => (
+                  <option key={field.key} value={field.key}>
+                    {field.label}
+                  </option>
+                ))}
+              </select>
+              <div style={S.miniLabel}>TopN/行数</div>
+              <input
+                style={S.configInput}
+                type="number"
+                min={1}
+                max={1000}
+                value={card.limit || getDefaultLimit(card.chart_type, meta)}
+                onChange={(e) => patchCard(index, { limit: Number(e.target.value) || 1 })}
+              />
             </div>
             <div style={S.cardItemMeta}>
               数据集：默认工作项数据集；图表：{labelOf(CHART_TYPE_LABELS, card.chart_type)}；指标：
@@ -405,8 +781,25 @@ const DraftConfirmCard: React.FC<any> = ({ draft, aiBusy, onConfirm }) => {
           </div>
         ))}
       </div>
+      {hasValidationMessages && (
+        <div style={S.validationBox(currentValidation.status)}>
+          {(currentValidation.errors || []).map((item: string, index: number) => (
+            <div key={`e-${index}`}>错误：{item}</div>
+          ))}
+          {(currentValidation.warnings || []).map((item: string, index: number) => (
+            <div key={`w-${index}`}>提示：{item}</div>
+          ))}
+          {(currentValidation.corrections || []).map((item: string, index: number) => (
+            <div key={`c-${index}`}>修正：{item}</div>
+          ))}
+        </div>
+      )}
       <div style={S.confirmActions}>
-        <button style={S.btn(true)} onClick={onConfirm} disabled={aiBusy}>
+        <button
+          style={S.btn(true)}
+          onClick={onConfirm}
+          disabled={aiBusy || currentValidation?.status === 'error'}
+        >
           添加 {cardCount} 张卡片到当前仪表盘
         </button>
       </div>
@@ -452,13 +845,13 @@ const AiReportDialogContent: React.FC<any> = ({
   aiHistory,
   aiBusy,
   aiDraft,
+  aiValidation,
+  aiMetadata,
   aiImage,
   aiMessages,
   aiPrompt,
   aiError,
-  setAiDraft,
   setAiImage,
-  setAiMessages,
   setAiPrompt,
   setAiError,
   handleGenerateDraft,
@@ -467,6 +860,7 @@ const AiReportDialogContent: React.FC<any> = ({
   handlePickImage,
   handlePasteImage,
   handleSelectAiSession,
+  handleDraftChange,
   onCancel,
 }) => {
   const fileInputId = 'bi-ai-image-input'
@@ -513,7 +907,14 @@ const AiReportDialogContent: React.FC<any> = ({
           </div>
         ))}
       </div>
-      <DraftConfirmCard draft={aiDraft} aiBusy={aiBusy} onConfirm={handleCreateFromDraft} />
+      <DraftConfirmCard
+        draft={aiDraft}
+        validation={aiValidation}
+        metadata={aiMetadata}
+        aiBusy={aiBusy}
+        onConfirm={handleCreateFromDraft}
+        onDraftChange={handleDraftChange}
+      />
       {aiHistory.length > 0 && (
         <div style={S.historyPanel}>
           <div style={S.historyTitle}>历史会话</div>
@@ -611,6 +1012,8 @@ const App: React.FC = () => {
   const [aiHistory, setAiHistory] = useState<any[]>([])
   const [aiHistoryItems, setAiHistoryItems] = useState<any[]>([])
   const [aiDraft, setAiDraft] = useState<any>(null)
+  const [aiValidation, setAiValidation] = useState<any>(null)
+  const [aiMetadata, setAiMetadata] = useState<any>(null)
   const [aiMessages, setAiMessages] = useState<any[]>([])
   const [aiError, setAiError] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
@@ -640,6 +1043,19 @@ const App: React.FC = () => {
     setAiHistoryItems(Array.isArray(data?.session_items) ? data.session_items : [])
   }
 
+  async function loadAiMetadata() {
+    if (aiMetadata) return aiMetadata
+    const res = await apiGet('/bi/metadata')
+    const metadata = res.data || {}
+    setAiMetadata(metadata)
+    return metadata
+  }
+
+  function handleDraftChange(nextDraft: any) {
+    setAiDraft(nextDraft)
+    setAiValidation(validateDraftClient(nextDraft, aiMetadata))
+  }
+
   async function saveAiSession(messages: any[], draft: any, sessionUuid = aiSessionUuid) {
     if (!currentUuid) return
     if (!sessionUuid && messages.length === 0 && !draft) return
@@ -661,11 +1077,13 @@ const App: React.FC = () => {
     setAiPrompt('')
     setAiImage(null)
     setAiDraft(null)
+    setAiValidation(null)
     setAiMessages([])
     setAiError('')
     setShowAiReport(true)
     if (!currentUuid) return
     try {
+      await loadAiMetadata()
       const res = await apiGet(`/bi/dashboard/${currentUuid}/ai/session`)
       applyAiSessionResponse(res.data || {})
     } catch (e: any) {
@@ -677,6 +1095,7 @@ const App: React.FC = () => {
     const sessionUuid = makeAiSessionUuid()
     setAiSessionUuid(sessionUuid)
     setAiDraft(null)
+    setAiValidation(null)
     setAiMessages([])
     setAiPrompt('')
     setAiImage(null)
@@ -689,6 +1108,7 @@ const App: React.FC = () => {
     setAiSessionUuid(session.session_uuid)
     setAiMessages(Array.isArray(session.messages) ? session.messages : [])
     setAiDraft(session.draft || null)
+    setAiValidation(validateDraftClient(session.draft || null, aiMetadata))
     setAiPrompt('')
     setAiImage(null)
     setAiError('')
@@ -771,6 +1191,7 @@ const App: React.FC = () => {
       })
       const result = res.data || {}
       const draft = result.status === 'ready' ? result.draft : aiDraft
+      const validation = result.validation || validateDraftClient(draft, aiMetadata)
       const assistantText =
         result.reply ||
         (draft ? '已整理出报表配置草稿，请确认是否添加。' : '我需要继续确认报表需求。')
@@ -785,6 +1206,7 @@ const App: React.FC = () => {
         },
       ]
       setAiDraft(draft)
+      setAiValidation(validation)
       setAiMessages(savedMessages)
       await saveAiSession(savedMessages, draft)
     } catch (e: any) {
@@ -801,6 +1223,7 @@ const App: React.FC = () => {
       ]
       setAiError(errorText)
       setAiMessages(failedMessages)
+      setAiValidation(validateDraftClient(aiDraft, aiMetadata))
       await saveAiSession(failedMessages, aiDraft)
     } finally {
       setAiBusy(false)
@@ -809,6 +1232,12 @@ const App: React.FC = () => {
 
   async function handleCreateFromDraft() {
     if (!aiDraft || !currentUuid) return
+    const validation = validateDraftClient(aiDraft, aiMetadata)
+    if (validation?.status === 'error') {
+      setAiValidation(validation)
+      setAiError('当前报表配置仍有错误，请先在确认卡中修正。')
+      return
+    }
     setAiBusy(true)
     try {
       const res = await apiPost('/bi/report/from-draft', {
@@ -818,13 +1247,15 @@ const App: React.FC = () => {
       const count = res.data?.card_count || aiDraft.cards?.length || 1
       setShowAiReport(false)
       setAiDraft(null)
+      setAiValidation(null)
       setAiMessages([])
       setAiPrompt('')
       setAiImage(null)
       setAiError('')
-      setDetailNotice(`已新增 ${count} 张 AI 报表卡片`)
+      setDetailNotice(`已新增 ${count} 张 AI 报表卡片，建议刷新快照查看真实数据`)
       setDetailReloadToken((value) => value + 1)
     } catch (e: any) {
+      if (e?.response?.validation) setAiValidation(e.response.validation)
       setAiError(e.message || '添加 AI 卡片失败')
     } finally {
       setAiBusy(false)
@@ -852,13 +1283,13 @@ const App: React.FC = () => {
                 aiHistory={aiHistory}
                 aiBusy={aiBusy}
                 aiDraft={aiDraft}
+                aiValidation={aiValidation}
+                aiMetadata={aiMetadata}
                 aiImage={aiImage}
                 aiMessages={aiMessages}
                 aiPrompt={aiPrompt}
                 aiError={aiError}
-                setAiDraft={setAiDraft}
                 setAiImage={setAiImage}
-                setAiMessages={setAiMessages}
                 setAiPrompt={setAiPrompt}
                 setAiError={setAiError}
                 handleGenerateDraft={handleGenerateDraft}
@@ -867,6 +1298,7 @@ const App: React.FC = () => {
                 handlePickImage={handlePickImage}
                 handlePasteImage={handlePasteImage}
                 handleSelectAiSession={handleSelectAiSession}
+                handleDraftChange={handleDraftChange}
                 onCancel={() => setShowAiReport(false)}
               />
             </div>

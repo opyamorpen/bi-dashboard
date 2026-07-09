@@ -63,6 +63,33 @@ const DEFAULT_ISSUE_FIELDS = [
   { key: 'sprint', label: '所属迭代', type: 'text', dimension: true, metric: false },
   { key: 'created_at', label: '创建时间', type: 'datetime', dimension: true, metric: false },
 ]
+const CHART_TYPE_OPTIONS = [
+  { value: 'number', label: '数字指标卡', requires_dimension: false, default_limit: 100 },
+  { value: 'bar', label: '柱状图', requires_dimension: true, default_limit: 15 },
+  { value: 'pie', label: '饼图', requires_dimension: true, default_limit: 8 },
+  { value: 'donut', label: '环形图', requires_dimension: true, default_limit: 8 },
+  { value: 'table', label: '明细表格', requires_dimension: false, default_limit: 50 },
+]
+const AGGREGATION_OPTIONS = [
+  { value: 'count', label: '计数' },
+  { value: 'count_distinct', label: '去重计数' },
+]
+const FILTER_OPERATOR_OPTIONS = [
+  { value: 'eq', label: '等于', needs_value: true },
+  { value: 'neq', label: '不等于', needs_value: true },
+  { value: 'in', label: '属于', needs_value: true, array_value: true },
+  { value: 'not_in', label: '不属于', needs_value: true, array_value: true },
+  { value: 'contains', label: '包含', needs_value: true },
+  { value: 'empty', label: '为空', needs_value: false },
+  { value: 'not_empty', label: '不为空', needs_value: false },
+]
+const DEFAULT_LAYOUTS: Record<string, any> = {
+  number: { x: 0, y: 0, w: 8, h: 4, grid_size: 48 },
+  bar: { x: 0, y: 0, w: 8, h: 8, grid_size: 48 },
+  pie: { x: 0, y: 0, w: 8, h: 6, grid_size: 48 },
+  donut: { x: 0, y: 0, w: 8, h: 6, grid_size: 48 },
+  table: { x: 0, y: 0, w: 8, h: 8, grid_size: 48 },
+}
 
 const FIELD_ALIASES: Record<string, string[]> = {
   uuid: ['uuid', 'key'],
@@ -433,6 +460,99 @@ function sanitizeReportDraft(input: any): any {
   }
 }
 
+function getDraftSource(input: any): any {
+  return input?.draft && typeof input.draft === 'object' ? input.draft : input || {}
+}
+
+function pushUnique(list: string[], value: string) {
+  if (value && !list.includes(value)) list.push(value)
+}
+
+function validateReportDraft(input: any, sanitizedDraft?: any): any {
+  const source = getDraftSource(input)
+  const draft = sanitizedDraft || sanitizeReportDraft(input)
+  const errors: string[] = []
+  const warnings: string[] = []
+  const corrections: string[] = []
+  const rawCards = Array.isArray(source?.cards) ? source.cards : []
+  const rawFilters = Array.isArray(source?.filters) ? source.filters : []
+
+  if (!source?.title) pushUnique(warnings, '需求标题为空，系统已使用默认标题。')
+  if (rawCards.length === 0) pushUnique(warnings, '未识别到卡片配置，系统已补充工作项总数指标卡。')
+
+  rawFilters.forEach((filter: any, index: number) => {
+    const fieldKey = String(filter?.field_key || '')
+    const operator = String(filter?.operator || '')
+    if (!SUPPORTED_FIELDS.has(fieldKey)) {
+      pushUnique(errors, `筛选条件 ${index + 1} 使用了不支持的字段：${fieldKey || '空字段'}。`)
+    }
+    if (!SUPPORTED_FILTER_OPERATORS.has(operator)) {
+      pushUnique(errors, `筛选条件 ${index + 1} 使用了不支持的操作符：${operator || '空操作符'}。`)
+    }
+  })
+  if (rawFilters.length > (draft.filters || []).length) {
+    pushUnique(corrections, '系统已移除不在白名单内的筛选条件。')
+  }
+
+  rawCards.forEach((card: any, index: number) => {
+    const chartType = String(card?.chart_type || '')
+    const metric = card?.metric || {}
+    const metricField = String(metric.field_key || '')
+    const aggregation = String(metric.aggregation || '')
+    const dimensionField = String(card?.dimension?.field_key || '')
+    if (chartType && !SUPPORTED_CHART_TYPES.has(chartType)) {
+      pushUnique(errors, `卡片 ${index + 1} 使用了不支持的图表类型：${chartType}。`)
+    }
+    if (aggregation && !SUPPORTED_AGGREGATIONS.has(aggregation)) {
+      pushUnique(errors, `卡片 ${index + 1} 使用了不支持的聚合方式：${aggregation}。`)
+    }
+    if (metricField && !SUPPORTED_FIELDS.has(metricField)) {
+      pushUnique(errors, `卡片 ${index + 1} 使用了不支持的指标字段：${metricField}。`)
+    }
+    if (dimensionField && !SUPPORTED_FIELDS.has(dimensionField)) {
+      pushUnique(errors, `卡片 ${index + 1} 使用了不支持的维度字段：${dimensionField}。`)
+    }
+    if (['bar', 'pie', 'donut'].includes(chartType) && !dimensionField) {
+      pushUnique(errors, `卡片 ${index + 1} 的${chartType}图表需要选择一个分析维度。`)
+    }
+    if (chartType === 'number' && dimensionField) {
+      pushUnique(corrections, `卡片 ${index + 1} 是数字指标卡，系统会忽略维度配置。`)
+    }
+    const rawLimit = Number(card?.limit)
+    const safeLimit = draft.cards?.[index]?.limit
+    if (Number.isFinite(rawLimit) && safeLimit && rawLimit !== safeLimit) {
+      pushUnique(corrections, `卡片 ${index + 1} 的 TopN/明细行数已调整到支持范围内。`)
+    }
+  })
+  ;(draft.cards || []).forEach((card: any, index: number) => {
+    if (['bar', 'pie', 'donut'].includes(card.chart_type) && !card.dimension?.field_key) {
+      pushUnique(errors, `卡片 ${index + 1} 的${card.chart_type}图表需要选择一个分析维度。`)
+    }
+    if (!SUPPORTED_CHART_TYPES.has(String(card.chart_type))) {
+      pushUnique(errors, `卡片 ${index + 1} 的图表类型不在支持范围内。`)
+    }
+    if (!SUPPORTED_AGGREGATIONS.has(String(card.metric?.aggregation || ''))) {
+      pushUnique(errors, `卡片 ${index + 1} 的聚合方式不在支持范围内。`)
+    }
+    if (!SUPPORTED_FIELDS.has(String(card.metric?.field_key || ''))) {
+      pushUnique(errors, `卡片 ${index + 1} 的指标字段不在支持范围内。`)
+    }
+    if (card.dimension?.field_key && !SUPPORTED_FIELDS.has(String(card.dimension.field_key))) {
+      pushUnique(errors, `卡片 ${index + 1} 的维度字段不在支持范围内。`)
+    }
+  })
+
+  const status =
+    errors.length > 0 ? 'error' : warnings.length > 0 || corrections.length > 0 ? 'warning' : 'ok'
+  return {
+    ok: errors.length === 0,
+    status,
+    errors,
+    warnings,
+    corrections,
+  }
+}
+
 function cloneDraft(draft: any): any {
   return JSON.parse(JSON.stringify(draft || {}))
 }
@@ -517,6 +637,7 @@ function sanitizeAiDialogResult(input: any): any {
     : []
   const draft =
     requestedStatus === 'ready' && input?.draft ? sanitizeReportDraft(input.draft) : null
+  const validation = draft ? validateReportDraft(input.draft, draft) : null
   const status = draft ? 'ready' : 'clarifying'
   return {
     status,
@@ -533,6 +654,7 @@ function sanitizeAiDialogResult(input: any): any {
     confirmed,
     missing,
     draft,
+    validation,
   }
 }
 
@@ -915,6 +1037,16 @@ export async function createReportFromDraft(req: any): Promise<PluginResponse> {
   const operator = getOperator(req)
   const b = (req.body || {}) as any
   const draft = sanitizeReportDraft(b.draft || b)
+  const validation = validateReportDraft(b.draft || b, draft)
+  if (!validation.ok) {
+    return {
+      body: {
+        error: '报表草稿配置未通过校验，请先修正后再添加。',
+        validation,
+      },
+      statusCode: 400,
+    }
+  }
   const now = Date.now()
   const cards = draft.cards.map((card: any, index: number) =>
     draftCardToStoredCard(card, index, draft.filters || []),
@@ -1579,11 +1711,21 @@ async function executeOnesqlQuery(
   const whereParts: string[] = []
   for (const f of params.filters || []) {
     if (f.operator === 'eq') whereParts.push(`${f.field_key} = '${f.value}'`)
+    else if (f.operator === 'neq') whereParts.push(`${f.field_key} != '${f.value}'`)
     else if (f.operator === 'in')
       whereParts.push(
         `${f.field_key} IN (${(f.value || []).map((v: string) => `'${v}'`).join(',')})`,
       )
-    else if (f.operator === 'like') whereParts.push(`${f.field_key} LIKE '%${f.value}%'`)
+    else if (f.operator === 'not_in')
+      whereParts.push(
+        `${f.field_key} NOT IN (${(f.value || []).map((v: string) => `'${v}'`).join(',')})`,
+      )
+    else if (f.operator === 'like' || f.operator === 'contains')
+      whereParts.push(`${f.field_key} LIKE '%${f.value}%'`)
+    else if (f.operator === 'empty')
+      whereParts.push(`(${f.field_key} IS NULL OR ${f.field_key} = '')`)
+    else if (f.operator === 'not_empty')
+      whereParts.push(`(${f.field_key} IS NOT NULL AND ${f.field_key} != '')`)
     else if (f.operator === 'gte') whereParts.push(`${f.field_key} >= '${f.value}'`)
     else if (f.operator === 'lte') whereParts.push(`${f.field_key} <= '${f.value}'`)
   }
@@ -1659,8 +1801,13 @@ function filterRows(rows: any[], filters: any[]): any[] {
     filters.every((f: any) => {
       const actual = String(readField(row, f.field_key) ?? '')
       if (f.operator === 'eq') return actual === String(f.value ?? '')
+      if (f.operator === 'neq') return actual !== String(f.value ?? '')
       if (f.operator === 'in') return (f.value || []).map(String).includes(actual)
-      if (f.operator === 'like') return actual.includes(String(f.value ?? ''))
+      if (f.operator === 'not_in') return !(f.value || []).map(String).includes(actual)
+      if (f.operator === 'like' || f.operator === 'contains')
+        return actual.includes(String(f.value ?? ''))
+      if (f.operator === 'empty') return actual === ''
+      if (f.operator === 'not_empty') return actual !== ''
       if (f.operator === 'gte') return actual >= String(f.value ?? '')
       if (f.operator === 'lte') return actual <= String(f.value ?? '')
       return true
@@ -1765,11 +1912,21 @@ export async function biDetail(req: any): Promise<PluginResponse> {
   const whereParts: string[] = []
   for (const f of filters || []) {
     if (f.operator === 'eq') whereParts.push(`${f.field_key} = '${f.value}'`)
+    else if (f.operator === 'neq') whereParts.push(`${f.field_key} != '${f.value}'`)
     else if (f.operator === 'in')
       whereParts.push(
         `${f.field_key} IN (${(f.value || []).map((v: string) => `'${v}'`).join(',')})`,
       )
-    else if (f.operator === 'like') whereParts.push(`${f.field_key} LIKE '%${f.value}%'`)
+    else if (f.operator === 'not_in')
+      whereParts.push(
+        `${f.field_key} NOT IN (${(f.value || []).map((v: string) => `'${v}'`).join(',')})`,
+      )
+    else if (f.operator === 'like' || f.operator === 'contains')
+      whereParts.push(`${f.field_key} LIKE '%${f.value}%'`)
+    else if (f.operator === 'empty')
+      whereParts.push(`(${f.field_key} IS NULL OR ${f.field_key} = '')`)
+    else if (f.operator === 'not_empty')
+      whereParts.push(`(${f.field_key} IS NOT NULL AND ${f.field_key} != '')`)
   }
   const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : ''
 
@@ -1805,30 +1962,22 @@ export async function biDetail(req: any): Promise<PluginResponse> {
 // ============================================================
 
 export async function getMetadata(req: any): Promise<PluginResponse> {
-  const teamUUID = getParam(req, 'teamUUID')
-
-  // 返回可用字段定义
   return {
     body: {
       data: {
-        fields: [
-          { key: 'title', label: '标题', type: 'text', dimension: false, metric: false },
-          { key: 'issue_type', label: '工作项类型', type: 'text', dimension: true, metric: false },
-          { key: 'status', label: '状态', type: 'text', dimension: true, metric: false },
-          { key: 'assignee', label: '负责人', type: 'user', dimension: true, metric: false },
-          { key: 'project', label: '所属项目', type: 'text', dimension: true, metric: false },
-          { key: 'sprint', label: '所属迭代', type: 'text', dimension: true, metric: false },
-          { key: 'priority', label: '优先级', type: 'text', dimension: true, metric: false },
-          { key: 'created_at', label: '创建时间', type: 'date', dimension: true, metric: false },
-          {
-            key: 'issue_count',
-            label: '工作项计数',
-            type: 'number',
-            dimension: false,
-            metric: true,
-            aggregation: 'count',
-          },
-        ],
+        fields: DEFAULT_ISSUE_FIELDS.map((field) => ({
+          ...field,
+          metric: SUPPORTED_FIELDS.has(field.key),
+        })),
+        chart_types: CHART_TYPE_OPTIONS,
+        aggregations: AGGREGATION_OPTIONS,
+        filter_operators: FILTER_OPERATOR_OPTIONS,
+        default_limits: CHART_TYPE_OPTIONS.reduce((acc: any, item: any) => {
+          acc[item.value] = item.default_limit
+          return acc
+        }, {}),
+        default_layouts: DEFAULT_LAYOUTS,
+        grid_size: 48,
       },
     },
   }
